@@ -10,7 +10,8 @@ h1{font-size: 50px;
     padding: 5%;
 }
 .omg img{width: 100%;
-border-radius: 10px; }
+border-radius: 10px;
+box-shadow: 10px 10px 20px cornflowerblue ; }
 .link{ text-decoration: none;
 background-image: linear-gradient(orange,tomato);
  padding: 10px 40px;
