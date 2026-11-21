@@ -99,6 +99,9 @@ function renderTraining(t) {
     <table><tr><th>পেয়ার</th><th>ট্রেড</th><th>জয়</th><th>হার</th><th>Win%</th></tr>${rows}</table>`;
 }
 
+const update1mWarn = () => { $('tf1mWarn').hidden = $('trainTf').value !== '1m'; };
+$('trainTf').addEventListener('change', update1mWarn);
+
 $('trainBtn').addEventListener('click', async () => {
   const btn = $('trainBtn');
   btn.disabled = true;

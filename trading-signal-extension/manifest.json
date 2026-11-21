@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Trade Signal Lab",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "টেকনিক্যাল অ্যানালাইসিস দিয়ে সিগন্যাল দেয় এবং নিজের ফলাফল থেকে শেখে (শিক্ষামূলক)।",
   "action": {
     "default_popup": "popup.html",
