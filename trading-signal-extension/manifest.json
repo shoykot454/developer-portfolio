@@ -1,0 +1,15 @@
+{
+  "manifest_version": 3,
+  "name": "Trade Signal Lab",
+  "version": "1.0.0",
+  "description": "টেকনিক্যাল অ্যানালাইসিস দিয়ে সিগন্যাল দেয় এবং নিজের ফলাফল থেকে শেখে (শিক্ষামূলক)।",
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Trade Signal Lab",
+    "default_icon": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" }
+  },
+  "icons": { "16": "icons/icon16.png", "48": "icons/icon48.png", "128": "icons/icon128.png" },
+  "background": { "service_worker": "src/background.js", "type": "module" },
+  "permissions": ["storage", "alarms", "notifications"],
+  "host_permissions": ["https://data-api.binance.vision/*", "https://api.binance.com/*"]
+}
