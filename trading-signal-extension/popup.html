@@ -44,11 +44,12 @@
     <p class="hint">Watchlist-এর প্রতিটা পেয়ারের শেষ ১০০০টা ক্যান্ডেলে backtest চালিয়ে কোন ফ্যাক্টর কাজ করে তা শেখে।</p>
     <div class="row">
       <select id="trainTf">
-        <option>5m</option><option selected>15m</option><option>30m</option><option>1h</option><option>4h</option><option>1d</option>
+        <option>1m</option><option>5m</option><option selected>15m</option><option>30m</option><option>1h</option><option>4h</option><option>1d</option>
       </select>
       <button id="trainBtn" class="primary">ট্রেনিং শুরু</button>
       <button id="resetBtn" class="ghost">রিসেট</button>
     </div>
+    <p id="tf1mWarn" class="warn" hidden>⚠️ 1m-এ ১০০০ ক্যান্ডেল মানে মাত্র ~১৬ ঘণ্টার ডেটা, আর noise অনেক বেশি। ফলাফলে বেশি ভরসা করবেন না।</p>
     <div id="trainOut" class="hint"></div>
   </section>
 
