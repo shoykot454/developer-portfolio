@@ -1,0 +1,71 @@
+:root {
+  --bg: #0f172a; --card: #1e293b; --line: #334155; --text: #e2e8f0; --muted: #94a3b8;
+  --buy: #22c55e; --sell: #ef4444; --wait: #eab308; --accent: #3b82f6;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; width: 400px; min-height: 480px; background: var(--bg); color: var(--text);
+  font: 13px/1.45 "Noto Sans Bengali", "Hind Siliguri", system-ui, sans-serif;
+}
+header { position: sticky; top: 0; background: var(--bg); border-bottom: 1px solid var(--line); padding: 10px 12px 0; z-index: 2; }
+.brand { font-weight: 700; font-size: 15px; margin-bottom: 8px; }
+nav { display: flex; gap: 2px; }
+.tab { flex: 1; background: none; border: 0; color: var(--muted); padding: 8px 4px; cursor: pointer; border-bottom: 2px solid transparent; font: inherit; }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
+.panel { display: none; padding: 12px; }
+.panel.active { display: block; }
+.row { display: flex; gap: 6px; align-items: center; margin-bottom: 10px; }
+.row.between { justify-content: space-between; }
+input, select {
+  background: var(--card); color: var(--text); border: 1px solid var(--line); border-radius: 6px;
+  padding: 7px 8px; font: inherit; min-width: 0;
+}
+#symbol { flex: 1; text-transform: uppercase; }
+button { font: inherit; border-radius: 6px; padding: 7px 10px; cursor: pointer; border: 1px solid var(--line); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.ghost { background: var(--card); color: var(--text); }
+button:disabled { opacity: .5; cursor: wait; }
+h3 { font-size: 13px; margin: 14px 0 6px; }
+h3 small { color: var(--muted); font-weight: 400; }
+.hint, .note { color: var(--muted); font-size: 12px; }
+.note { border-top: 1px solid var(--line); padding-top: 8px; margin-top: 12px; }
+.err { color: var(--sell); }
+
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.sig-head { display: flex; justify-content: space-between; align-items: center; }
+.sig { font-size: 26px; font-weight: 800; letter-spacing: 1px; }
+.sig.BUY { color: var(--buy); } .sig.SELL { color: var(--sell); } .sig.WAIT { color: var(--wait); }
+.meter { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin: 8px 0 4px; }
+.meter > i { display: block; height: 100%; }
+.kv { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px; margin-top: 8px; }
+.kv div { display: flex; justify-content: space-between; }
+.kv span:first-child { color: var(--muted); }
+.warn { color: var(--wait); font-size: 12px; margin-top: 6px; }
+
+.factor { display: grid; grid-template-columns: 18px 1fr auto; gap: 6px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.factor:last-child { border-bottom: 0; }
+.factor .name { font-weight: 600; }
+.factor .why { color: var(--muted); font-size: 12px; grid-column: 2 / 4; }
+.factor .v { font-variant-numeric: tabular-nums; font-size: 12px; }
+.pos { color: var(--buy); } .neg { color: var(--sell); } .neu { color: var(--muted); }
+
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.stat { background: var(--card); border-radius: 8px; padding: 8px; text-align: center; }
+.stat b { display: block; font-size: 17px; }
+.stat span { color: var(--muted); font-size: 11px; }
+.wrow { display: grid; grid-template-columns: 140px 1fr 36px; gap: 8px; align-items: center; margin: 4px 0; }
+.wbar { height: 8px; background: var(--line); border-radius: 4px; overflow: hidden; }
+.wbar i { display: block; height: 100%; background: var(--accent); }
+
+table { width: 100%; border-collapse: collapse; font-size: 12px; }
+th, td { text-align: left; padding: 5px 4px; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 500; }
+.badge { padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+.badge.win { background: #14532d; color: #86efac; } .badge.loss { background: #7f1d1d; color: #fca5a5; }
+.badge.pending { background: #334155; } .badge.expired { background: #713f12; color: #fde68a; }
+
+label { display: block; color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+label input, label select { display: block; width: 100%; margin-top: 3px; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0 10px; }
+label.check { display: flex; gap: 8px; align-items: center; color: var(--text); }
+label.check input { width: auto; margin: 0; }
