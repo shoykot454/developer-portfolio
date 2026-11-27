@@ -69,7 +69,11 @@
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong");
       if (!data.shorts.length) throw new Error(`এই চ্যানেলে কোনো ${word(type)} পাওয়া যায়নি।`);
-      listed = type;
+      listed = data.type || type;
+      if (listed !== mode) {           // a single link decides by itself: Short or long video
+        mode = listed;
+        applyMode();
+      }
       shorts = data.shorts;
       channel = data.channel || {};
       render();

@@ -165,10 +165,20 @@ def list_channel_shorts(shorts_url: str, limit: int, tab: str = "shorts"):
     return channel, shorts
 
 
-def get_single_video(video_id: str, tab: str = "shorts"):
+def detect_tab(info, is_shorts_link: bool) -> str:
+    """Is a single video a Short or a regular (long) video?"""
+    if is_shorts_link:
+        return "shorts"
+    w, h, dur = info.get("width") or 0, info.get("height") or 0, info.get("duration") or 0
+    return "shorts" if (h > w > 0 and 0 < dur <= 180) else "videos"
+
+
+def get_single_video(video_id: str, is_shorts_link: bool = False):
+    """Look up one video. Returns (channel, [video], tab) — tab says where it gets saved."""
     opts = {"quiet": True, "no_warnings": True, "skip_download": True}
     with yt_dlp.YoutubeDL(opts) as ydl:
         info = ydl.extract_info(video_url(video_id, "videos"), download=False)
+    tab = detect_tab(info, is_shorts_link)
     channel = {
         "title": info.get("channel") or info.get("uploader") or "",
         "url": info.get("channel_url") or "",
@@ -182,7 +192,7 @@ def get_single_video(video_id: str, tab: str = "shorts"):
         "duration": info.get("duration"),
         "url": video_url(video_id, tab),
     }
-    return channel, [short]
+    return channel, [short], tab
 
 
 # --------------------------------------------------------------------------- #
@@ -391,15 +401,16 @@ def index():
 @app.get("/api/shorts")
 def api_shorts():
     tab = tab_of(request.args.get("type"))
+    raw_url = request.args.get("url", "")
     try:
-        kind, value = normalize_input(request.args.get("url", ""))
+        kind, value = normalize_input(raw_url)
     except ValueError as exc:
         return jsonify(error=str(exc)), 400
 
     limit = min(int(request.args.get("limit", MAX_SHORTS) or MAX_SHORTS), MAX_SHORTS)
     try:
         if kind == "video":
-            channel, shorts = get_single_video(value, tab)
+            channel, shorts, tab = get_single_video(value, "/shorts/" in raw_url.lower())
         else:
             channel, shorts = list_channel_shorts(f"{value}/{tab}", limit, tab)
     except yt_dlp.utils.DownloadError as exc:
@@ -410,7 +421,7 @@ def api_shorts():
         return jsonify(error=f"Couldn't read that channel: {msg[:300]}"), 502
     for sh in shorts:
         sh["downloaded"] = sh["id"] in history
-    return jsonify(channel=channel, shorts=shorts, count=len(shorts),
+    return jsonify(channel=channel, shorts=shorts, count=len(shorts), type=tab, single=kind == "video",
                    downloaded=sum(sh["downloaded"] for sh in shorts))
 
 
