@@ -10,6 +10,32 @@
 
   let shorts = [], channel = {}, cards = new Map(), pollTimer = null, jobId = null;
 
+  // Which channel tab we work with: "shorts" or "videos" (regular long videos).
+  let mode = "shorts", listed = "shorts";
+  try { if (localStorage.getItem("ytdl-mode") === "videos") mode = "videos"; } catch (e) {}
+  const word = (t = listed) => (t === "videos" ? "ভিডিও" : "Shorts");
+
+  function applyMode() {
+    document.querySelectorAll(".tab").forEach((b) => {
+      const on = b.dataset.type === mode;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on);
+    });
+    goBtn.textContent = mode === "videos" ? "ভিডিও খুঁজুন" : "Shorts খুঁজুন";
+    quality.value = mode === "videos" ? "1080" : "best"; // long videos in 4K can be huge
+  }
+  document.querySelectorAll(".tab").forEach((b) =>
+    b.addEventListener("click", () => {
+      if (b.dataset.type === mode || jobId) return;
+      mode = b.dataset.type;
+      try { localStorage.setItem("ytdl-mode", mode); } catch (e) {}
+      applyMode();
+      if (urlInput.value.trim()) form.requestSubmit(); // re-list the same channel
+      else results.hidden = true;
+    })
+  );
+  applyMode();
+
   const fmtViews = (n) => {
     if (n == null) return "";
     if (n >= 1e9) return (n / 1e9).toFixed(1).replace(/\.0$/, "") + "B views";
@@ -17,7 +43,11 @@
     if (n >= 1e3) return (n / 1e3).toFixed(1).replace(/\.0$/, "") + "K views";
     return n + " views";
   };
-  const fmtDur = (s) => (s ? `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}` : "");
+  const fmtDur = (s) => {
+    if (!s) return "";
+    const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = String(Math.floor(s % 60)).padStart(2, "0");
+    return h ? `${h}:${String(m).padStart(2, "0")}:${sec}` : `${m}:${sec}`;
+  };
 
   function showStatus(html, isError = false) {
     statusEl.hidden = false;
@@ -32,12 +62,14 @@
     if (!url) return;
     goBtn.disabled = true;
     results.hidden = true;
-    showStatus('<span class="spinner"></span>চ্যানেলের Shorts খোঁজা হচ্ছে… (বড় চ্যানেলে একটু সময় লাগতে পারে)');
+    const type = mode;
+    showStatus(`<span class="spinner"></span>চ্যানেলের ${word(type)} খোঁজা হচ্ছে… (বড় চ্যানেলে একটু সময় লাগতে পারে)`);
     try {
-      const res = await fetch("/api/shorts?url=" + encodeURIComponent(url));
+      const res = await fetch(`/api/list?type=${type}&url=` + encodeURIComponent(url));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong");
-      if (!data.shorts.length) throw new Error("এই চ্যানেলে কোনো Shorts পাওয়া যায়নি।");
+      if (!data.shorts.length) throw new Error(`এই চ্যানেলে কোনো ${word(type)} পাওয়া যায়নি।`);
+      listed = type;
       shorts = data.shorts;
       channel = data.channel || {};
       render();
@@ -52,13 +84,14 @@
   function render() {
     grid.innerHTML = "";
     cards.clear();
-    $("#chTitle").textContent = channel.title || "Shorts";
+    $("#chTitle").textContent = channel.title || word();
+    grid.classList.toggle("landscape", listed === "videos");
     const had = shorts.filter((s) => s.downloaded).length;
     $("#chCount").textContent = had
-      ? `${shorts.length} টি Shorts · ${shorts.length - had} টি নতুন · ${had} টি আগে নামানো`
-      : `${shorts.length} টি Shorts`;
+      ? `${shorts.length} টি ${word()} · ${shorts.length - had} টি নতুন · ${had} টি আগে নামানো`
+      : `${shorts.length} টি ${word()}`;
     jobBox.hidden = true;
-    if (had === shorts.length) showStatus("✓ এই চ্যানেলের সব Shorts আগেই নামানো আছে — নতুন কিছু নেই।");
+    if (had === shorts.length) showStatus(`✓ এই চ্যানেলের সব ${word()} আগেই নামানো আছে — নতুন কিছু নেই।`);
 
     const frag = document.createDocumentFragment();
     for (const s of shorts) {
@@ -130,7 +163,7 @@
     const form = document.createElement("form");
     form.method = "POST";
     form.action = "/api/zip";
-    for (const [k, v] of [["ids", ids.join(",")], ["name", `${channel.title || "channel"} shorts`]]) {
+    for (const [k, v] of [["ids", ids.join(",")], ["name", `${channel.title || "channel"} ${listed}`]]) {
       const input = document.createElement("input");
       input.type = "hidden"; input.name = k; input.value = v;
       form.appendChild(input);
@@ -151,7 +184,7 @@
       const res = await fetch(`/api/download/${s.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quality: quality.value, channel: channel.title || "channel", title: s.title }),
+        body: JSON.stringify({ quality: quality.value, type: listed, channel: channel.title || "channel", title: s.title }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Download failed");
@@ -180,7 +213,7 @@
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, titles, quality: quality.value, channel: channel.title || "channel", name: `${channel.title || "channel"} shorts` }),
+        body: JSON.stringify({ ids, titles, quality: quality.value, type: listed, channel: channel.title || "channel", name: `${channel.title || "channel"} ${listed}` }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not start");
@@ -235,7 +268,7 @@
         if (job.status === "finished") {
           jobBar.style.width = "100%";
           const skipTxt = job.skipped ? ` · ${job.skipped} টি আগেই ছিল, আবার নামানো হয়নি` : "";
-          jobText.textContent = `✓ ${job.new} টি নতুন Shorts সেভ হয়েছে${skipTxt}${failTxt}`;
+          jobText.textContent = `✓ ${job.new} টি নতুন ${word()} সেভ হয়েছে${skipTxt}${failTxt}`;
           jobFolder.textContent = "ফোল্ডার: " + job.folder;
           openFolder.hidden = false;
           openFolder.onclick = () => fetch(`/api/jobs/${job.id}/open`, { method: "POST" });

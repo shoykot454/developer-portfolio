@@ -42,6 +42,13 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 6px; font-si
 .sub { color: var(--muted); max-width: 640px; margin: 0 auto 26px; }
 .hint { color: var(--muted); font-size: 13px; margin-top: 12px; }
 
+.tabs {
+  display: inline-flex; gap: 4px; padding: 4px; margin: 0 auto 16px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
+}
+.tab { background: transparent; color: var(--muted); padding: 9px 20px; font-size: 15px; }
+.tab.active { background: linear-gradient(135deg, var(--accent), var(--accent-2)); color: #fff; }
+.tab:not(.active):hover { color: var(--text); }
 .search {
   display: flex; gap: 8px; max-width: 720px; margin: 0 auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px;
@@ -114,6 +121,8 @@ select {
   border-radius: 8px; padding: 4px 6px; display: flex;
 }
 .pick input { width: 17px; height: 17px; accent-color: var(--accent); cursor: pointer; margin: 0; }
+.grid.landscape { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); }
+.grid.landscape .thumb { aspect-ratio: 16 / 9; }
 .thumb { position: relative; aspect-ratio: 9 / 16; background: var(--panel-2); display: block; }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .dur {
@@ -141,6 +150,7 @@ select {
   .search { flex-direction: column; border-radius: var(--radius); }
   .search button { width: 100%; }
   .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .grid.landscape { grid-template-columns: 1fr; }
   .actions { width: 100%; }
   .actions select, .actions .primary { flex: 1; }
 }

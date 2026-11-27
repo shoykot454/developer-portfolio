@@ -1,9 +1,13 @@
-# YouTube Shorts Downloader
+# YouTube Shorts & Video Downloader
 
-একটা YouTube চ্যানেলের লিঙ্ক (বা `@handle`) দিন → চ্যানেলের সব Shorts দেখাবে →
-একটা একটা করে, অথবা সিলেক্ট করে সবগুলো একসাথে **ZIP** হিসেবে ডাউনলোড করুন।
+একটা YouTube চ্যানেলের লিঙ্ক (বা `@handle`) দিন → চ্যানেলের সব **Shorts** অথবা সব **লম্বা ভিডিও** দেখাবে →
+একটা একটা করে, অথবা সিলেক্ট করে সবগুলো একসাথে ডাউনলোড করুন।
 
 ## ফিচার
+- উপরে দুটো ট্যাব: **📱 Shorts** আর **🎬 লম্বা ভিডিও** — যেটা চান বেছে নিন
+  - Shorts সেভ হয় `Downloads\YouTube Shorts\<চ্যানেল>` ফোল্ডারে
+  - লম্বা ভিডিও সেভ হয় `Downloads\YouTube Videos\<চ্যানেল>` ফোল্ডারে
+  - কোয়ালিটি: Best / 1080p / 720p / 480p / শুধু অডিও (লম্বা ভিডিওতে ডিফল্ট 1080p, কারণ 4K অনেক বড় হয়)
 - চ্যানেল লিঙ্ক চেনে: `youtube.com/@name`, `/channel/UC…`, `/c/name`, `/user/name`, শুধু `@name`, অথবা একটা `/shorts/…` লিঙ্ক
 - থাম্বনেইল, টাইটেল, ভিউ, ডিউরেশনসহ সব Shorts-এর গ্রিড
 - সিলেক্ট/আনসিলেক্ট, কোয়ালিটি বাছাই (Best / 720p / 480p / শুধু অডিও)
@@ -34,7 +38,8 @@ ffmpeg ইনস্টল: Windows → `winget install ffmpeg`, macOS → `brew 
 | `MAX_SHORTS` | 5000 | একটা চ্যানেল থেকে সর্বোচ্চ কতগুলো Shorts লিস্ট হবে |
 | `MAX_PER_JOB` | 5000 | একবারে সর্বোচ্চ কতগুলো ডাউনলোড |
 | `CONCURRENCY` | 3 | একসাথে কতগুলো ভিডিও নামবে (বেশি দিলে YouTube ব্লক করতে পারে) |
-| `SAVE_DIR` | `~/Downloads/YouTube Shorts` | ভিডিও কোথায় সেভ হবে |
+| `SAVE_DIR` | `~/Downloads/YouTube Shorts` | Shorts কোথায় সেভ হবে |
+| `VIDEOS_DIR` | `~/Downloads/YouTube Videos` | লম্বা ভিডিও কোথায় সেভ হবে |
 | `JOB_TTL_SECONDS` | 21600 | কতক্ষণ পর পুরনো জবের অস্থায়ী ZIP মুছে যাবে |
 | `DOWNLOAD_ROOT` | system temp | অস্থায়ী ফাইল/ZIP কোথায় রাখা হবে |
 
