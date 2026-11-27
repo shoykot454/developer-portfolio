@@ -10,30 +10,78 @@
 
   let shorts = [], channel = {}, cards = new Map(), pollTimer = null, jobId = null;
 
-  // Which channel tab we work with: "shorts" or "videos" (regular long videos).
+  // Which tab we work with. YouTube: "shorts" | "videos". Facebook: "fb_reels" | "fb_videos".
+  const linksInput = $("#links"), hintEl = $("#hint"), subEl = $("#sub"), fbHelp = $("#fbHelp");
+  const TABS = ["shorts", "videos", "fb_reels", "fb_videos"];
   let mode = "shorts", listed = "shorts";
-  try { if (localStorage.getItem("ytdl-mode") === "videos") mode = "videos"; } catch (e) {}
-  const word = (t = listed) => (t === "videos" ? "ভিডিও" : "Shorts");
+  try { const m = localStorage.getItem("ytdl-mode"); if (TABS.includes(m)) mode = m; } catch (e) {}
+  const platformOf = (t) => (t.startsWith("fb_") ? "fb" : "yt");
+  const isLandscape = (t) => t === "videos" || t === "fb_videos";
+  const word = (t = listed) => ({ shorts: "Shorts", videos: "ভিডিও", fb_reels: "Reels", fb_videos: "ভিডিও" })[t];
+  const TEXT = {
+    shorts: { go: "Shorts খুঁজুন", sub: "YouTube চ্যানেলের লিঙ্ক বা <code>@handle</code> দিন — চ্যানেলের সব Shorts দেখাবে, একটা একটা করে বা সবগুলো একসাথে নামিয়ে নিন।" },
+    videos: { go: "ভিডিও খুঁজুন", sub: "YouTube চ্যানেলের লিঙ্ক বা <code>@handle</code> দিন — চ্যানেলের সব লম্বা ভিডিও দেখাবে, একটা একটা করে বা সবগুলো একসাথে নামিয়ে নিন।" },
+    fb_reels: { go: "লিঙ্কগুলো দেখুন", sub: "ফেসবুকের এক বা অনেকগুলো <b>Reels</b>-এর লিঙ্ক দিন — সব দেখাবে, একসাথে নামিয়ে নিন।" },
+    fb_videos: { go: "লিঙ্কগুলো দেখুন", sub: "ফেসবুকের এক বা অনেকগুলো <b>ভিডিও</b>-র লিঙ্ক দিন — সব দেখাবে, একসাথে নামিয়ে নিন।" },
+  };
+  const HINT = {
+    yt: "চলবে: <code>youtube.com/@name</code>, <code>/channel/UC…</code>, <code>/c/name</code>, অথবা একটা ভিডিওর লিঙ্ক",
+    fb: "চলবে: <code>facebook.com/reel/…</code>, <code>facebook.com/…/videos/…</code>, <code>facebook.com/watch?v=…</code>, <code>fb.watch/…</code> — শুধু পাবলিক ভিডিও",
+  };
 
   function applyMode() {
+    const plat = platformOf(mode);
+    document.body.classList.toggle("fb", plat === "fb");
+    document.querySelectorAll(".plat").forEach((b) => {
+      const on = b.dataset.platform === plat;
+      b.classList.toggle("active", on);
+      b.setAttribute("aria-selected", on);
+    });
     document.querySelectorAll(".tab").forEach((b) => {
+      b.hidden = b.dataset.platform !== plat;
       const on = b.dataset.type === mode;
       b.classList.toggle("active", on);
       b.setAttribute("aria-selected", on);
     });
-    goBtn.textContent = mode === "videos" ? "ভিডিও খুঁজুন" : "Shorts খুঁজুন";
-    quality.value = mode === "videos" ? "1080" : "best"; // long videos in 4K can be huge
+    urlInput.hidden = plat === "fb";
+    linksInput.hidden = plat !== "fb";
+    form.classList.toggle("multi", plat === "fb");
+    fbHelp.hidden = plat !== "fb";
+    goBtn.textContent = TEXT[mode].go;
+    subEl.innerHTML = TEXT[mode].sub;
+    hintEl.innerHTML = HINT[plat];
+    quality.value = mode === "videos" ? "1080" : "best"; // long YouTube videos in 4K can be huge
   }
-  document.querySelectorAll(".tab").forEach((b) =>
+  function setMode(next, relist) {
+    if (next === mode || jobId) return;
+    mode = next;
+    try { localStorage.setItem("ytdl-mode", mode); } catch (e) {}
+    applyMode();
+    hideStatus();
+    if (relist && currentInput()) form.requestSubmit(); // re-list the same channel / links
+    else results.hidden = true;
+  }
+  const currentInput = () => (platformOf(mode) === "fb" ? linksInput.value : urlInput.value).trim();
+
+  document.querySelectorAll(".tab").forEach((b) => b.addEventListener("click", () => setMode(b.dataset.type, true)));
+  document.querySelectorAll(".plat").forEach((b) =>
     b.addEventListener("click", () => {
-      if (b.dataset.type === mode || jobId) return;
-      mode = b.dataset.type;
-      try { localStorage.setItem("ytdl-mode", mode); } catch (e) {}
-      applyMode();
-      if (urlInput.value.trim()) form.requestSubmit(); // re-list the same channel
-      else results.hidden = true;
+      if (b.dataset.platform !== platformOf(mode)) setMode(b.dataset.platform === "fb" ? "fb_reels" : "shorts", false);
     })
   );
+
+  // Bookmarklet: run on a Facebook page's Reels/Videos tab, scrolls to the end and collects every link.
+  const BOOKMARKLET = String.raw`(async()=>{if(!/facebook\.com/.test(location.host)){alert('এটা ফেসবুক পেজে গিয়ে চাপুন।');return}
+if(confirm('পুরো পেজ নিচ পর্যন্ত নিজে স্ক্রল করে সব লিঙ্ক নেবে?\nOK = হ্যাঁ (বড় পেজে কয়েক মিনিট লাগবে)\nCancel = শুধু এখন যা দেখা যাচ্ছে')){let last=0,same=0;for(let i=0;i<600&&same<6;i++){scrollTo(0,document.body.scrollHeight);await new Promise(r=>setTimeout(r,1500));const h=document.body.scrollHeight;same=h===last?same+1:0;last=h}}
+const s=new Set();for(const a of document.querySelectorAll('a[href]')){const h=a.href;let m=h.match(/facebook\.com\/reel\/(\d+)/);if(m){s.add('https://www.facebook.com/reel/'+m[1]);continue}
+m=h.match(/facebook\.com\/[^?#]*\/videos\/(?:[^/?#]+\/)?(\d{8,})/)||h.match(/facebook\.com\/watch\/?\?(?:.*&)?v=(\d{8,})/);if(m)s.add('https://www.facebook.com/watch/?v='+m[1])}
+if(!s.size){alert('কোনো রিল/ভিডিওর লিঙ্ক পাওয়া যায়নি। পেজের Reels বা Videos ট্যাব খুলে আবার চাপুন।');return}
+const t=[...s].join('\n'),d=document.createElement('div');d.style.cssText='position:fixed;inset:0;z-index:2147483647;background:rgba(0,0,0,.6);display:grid;place-items:center;font:15px sans-serif';
+d.innerHTML='<div style="background:#fff;color:#111;padding:20px;border-radius:12px;width:min(560px,92vw)"><b>'+s.size+' টি লিঙ্ক পাওয়া গেছে</b><textarea style="width:100%;height:220px;margin:10px 0;font-size:12px"></textarea><button id="c" style="padding:8px 18px;background:#1877f2;color:#fff;border:0;border-radius:8px;font-size:15px">কপি</button> <button id="x" style="padding:8px 18px;border-radius:8px;font-size:15px">বন্ধ</button> <span id="o"></span></div>';
+document.body.appendChild(d);const ta=d.querySelector('textarea');ta.value=t;
+d.querySelector('#c').onclick=async()=>{ta.select();try{await navigator.clipboard.writeText(t)}catch(e){document.execCommand('copy')}d.querySelector('#o').textContent='✓ কপি হয়েছে! এখন ডাউনলোডার সাইটে পেস্ট করুন।'};
+d.querySelector('#x').onclick=()=>d.remove()})()`;
+  $("#bookmarklet").href = "javascript:" + encodeURIComponent(BOOKMARKLET.replace(/\n/g, ""));
   applyMode();
 
   const fmtViews = (n) => {
@@ -58,44 +106,63 @@
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
-    const url = urlInput.value.trim();
-    if (!url) return;
+    const input = currentInput();
+    const type = mode;
+    if (!input) {
+      showStatus(platformOf(type) === "fb" ? "ফেসবুকের লিঙ্ক দিন।" : "চ্যানেলের লিঙ্ক দিন।", true);
+      return;
+    }
     goBtn.disabled = true;
     results.hidden = true;
-    const type = mode;
-    showStatus(`<span class="spinner"></span>চ্যানেলের ${word(type)} খোঁজা হচ্ছে… (বড় চ্যানেলে একটু সময় লাগতে পারে)`);
+    showStatus(platformOf(type) === "fb"
+      ? '<span class="spinner"></span>লিঙ্কগুলো দেখা হচ্ছে… (অনেক লিঙ্ক হলে একটু সময় লাগবে)'
+      : `<span class="spinner"></span>চ্যানেলের ${word(type)} খোঁজা হচ্ছে… (বড় চ্যানেলে একটু সময় লাগতে পারে)`);
     try {
-      const res = await fetch(`/api/list?type=${type}&url=` + encodeURIComponent(url));
+      const res = platformOf(type) === "fb"
+        ? await fetch("/api/fb/list", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ links: input, type }),
+          })
+        : await fetch(`/api/list?type=${type}&url=` + encodeURIComponent(input));
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Something went wrong");
-      if (!data.shorts.length) throw new Error(`এই চ্যানেলে কোনো ${word(type)} পাওয়া যায়নি।`);
+      if (!data.shorts.length) throw new Error(`কোনো ${word(type)} পাওয়া যায়নি।`);
       listed = data.type || type;
-      if (listed !== mode) {           // a single link decides by itself: Short or long video
+      if (listed !== mode) {           // the links decide by themselves: Short/Reel or long video
         mode = listed;
         applyMode();
       }
       shorts = data.shorts;
       channel = data.channel || {};
-      render();
       hideStatus();
+      render();
+      if (data.failed && data.failed.length) showFailed(data.failed);
     } catch (err) {
-      showStatus(err.message, true);
+      showStatus(escapeHtml(err.message), true);
     } finally {
       goBtn.disabled = false;
     }
   });
 
+  const escapeHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+  function showFailed(failed) {
+    const items = failed.slice(0, 20).map((f) => `<li>${escapeHtml(f.url)} — ${escapeHtml(f.error)}</li>`).join("");
+    const more = failed.length > 20 ? `<li>…আরও ${failed.length - 20} টি</li>` : "";
+    showStatus(`⚠️ ${failed.length} টি লিঙ্ক খোলা যায়নি (বাকিগুলো নিচে আছে):<ul class="failed">${items}${more}</ul>`, true);
+  }
+
   function render() {
     grid.innerHTML = "";
     cards.clear();
     $("#chTitle").textContent = channel.title || word();
-    grid.classList.toggle("landscape", listed === "videos");
+    grid.classList.toggle("landscape", isLandscape(listed));
     const had = shorts.filter((s) => s.downloaded).length;
     $("#chCount").textContent = had
       ? `${shorts.length} টি ${word()} · ${shorts.length - had} টি নতুন · ${had} টি আগে নামানো`
       : `${shorts.length} টি ${word()}`;
     jobBox.hidden = true;
-    if (had === shorts.length) showStatus(`✓ এই চ্যানেলের সব ${word()} আগেই নামানো আছে — নতুন কিছু নেই।`);
+    if (had === shorts.length) showStatus(`✓ এখানের সব ${word()} আগেই নামানো আছে — নতুন কিছু নেই।`);
 
     const frag = document.createDocumentFragment();
     for (const s of shorts) {
@@ -188,7 +255,7 @@
       const res = await fetch(`/api/download/${s.id}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quality: quality.value, type: listed, channel: channel.title || "channel", title: s.title }),
+        body: JSON.stringify({ quality: quality.value, type: listed, channel: channel.title || "channel", title: s.title, url: s.url }),
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data.error || "Download failed");
@@ -217,7 +284,7 @@
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, titles, quality: quality.value, type: listed, channel: channel.title || "channel", name: `${channel.title || "channel"} ${listed}` }),
+        body: JSON.stringify({ ids, titles, urls: Object.fromEntries(shorts.filter((s) => ids.includes(s.id)).map((s) => [s.id, s.url])), quality: quality.value, type: listed, channel: channel.title || "channel", name: `${channel.title || "channel"} ${listed}` }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not start");

@@ -1,9 +1,10 @@
 """
-YouTube Shorts & Video Downloader
----------------------------------
-Paste a YouTube channel link (or @handle, or a single video link) and
-download every Short — or every regular (long) video — from that channel,
-one by one or all together. Each video is downloaded only once.
+YouTube & Facebook Downloader
+-----------------------------
+YouTube: paste a channel link (or @handle, or one video link) and download every
+Short — or every regular (long) video — from that channel.
+Facebook: paste one or many Reel / video links and download them all.
+Each video is downloaded only once.
 
 Backend: Flask + yt-dlp. Run with:  python app.py   then open http://localhost:5000
 """
@@ -29,7 +30,12 @@ DOWNLOAD_ROOT = os.environ.get("DOWNLOAD_ROOT") or os.path.join(tempfile.gettemp
 # Bulk downloads are saved here, one sub-folder per channel (kept after the app stops).
 SAVE_DIR = os.environ.get("SAVE_DIR") or os.path.join(os.path.expanduser("~"), "Downloads", "YouTube Shorts")
 VIDEOS_DIR = os.environ.get("VIDEOS_DIR") or os.path.join(os.path.dirname(SAVE_DIR), "YouTube Videos")
-TAB_DIRS = {"shorts": SAVE_DIR, "videos": VIDEOS_DIR}   # channel tab -> where its downloads go
+FB_REELS_DIR = os.environ.get("FB_REELS_DIR") or os.path.join(os.path.dirname(SAVE_DIR), "Facebook Reels")
+FB_VIDEOS_DIR = os.environ.get("FB_VIDEOS_DIR") or os.path.join(os.path.dirname(SAVE_DIR), "Facebook Videos")
+TAB_DIRS = {                 # tab -> where its downloads go
+    "shorts": SAVE_DIR, "videos": VIDEOS_DIR,
+    "fb_reels": FB_REELS_DIR, "fb_videos": FB_VIDEOS_DIR,
+}
 MAX_SHORTS = int(os.environ.get("MAX_SHORTS", "5000"))      # max shorts listed per channel
 MAX_PER_JOB = int(os.environ.get("MAX_PER_JOB", "5000"))    # max shorts per bulk job
 CONCURRENCY = max(1, int(os.environ.get("CONCURRENCY", "3")))  # parallel downloads
@@ -39,7 +45,9 @@ os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
-VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")             # YouTube video id
+ITEM_ID_RE = re.compile(r"^(?:[A-Za-z0-9_-]{11}|fb_\d{12,30})$")  # YouTube id or "fb_<facebook id>"
+FB_URL_RE = re.compile(r"(?:https?://)?(?:[\w-]+\.)?(?:facebook\.com|fb\.watch)/[^\s\"'<>]+", re.I)
 # quality -> (format, format_sort). "res" is the smaller side, so 720 means 720p
 # for both landscape videos and vertical Shorts. Output is merged to MP4.
 QUALITY_FORMATS = {
@@ -52,7 +60,18 @@ QUALITY_FORMATS = {
 
 
 def tab_of(value) -> str:
-    return "videos" if value == "videos" else "shorts"
+    return value if value in TAB_DIRS else "shorts"
+
+
+def is_fb_url(url) -> bool:
+    return isinstance(url, str) and bool(FB_URL_RE.fullmatch(url.strip())) and url.startswith("http")
+
+
+def source_url(item_id: str, url: str = None) -> str:
+    """The page yt-dlp should download an item from."""
+    if item_id.startswith("fb_"):
+        return url if is_fb_url(url) else f"https://www.facebook.com/watch/?v={item_id[3:]}"
+    return video_url(item_id, "videos")
 
 
 def video_url(video_id: str, tab: str = "shorts") -> str:
@@ -198,7 +217,7 @@ def get_single_video(video_id: str, is_shorts_link: bool = False):
 # --------------------------------------------------------------------------- #
 # Downloading
 # --------------------------------------------------------------------------- #
-def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None) -> str:
+def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None, url: str = None) -> str:
     """Download a single video/short into out_dir. Returns the final file path."""
     fmt, sort = QUALITY_FORMATS.get(quality, QUALITY_FORMATS["best"])
     opts = {
@@ -220,15 +239,16 @@ def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None) 
         opts["progress_hooks"] = [progress_hook]
 
     with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(video_url(video_id, "videos"), download=True)
+        info = ydl.extract_info(source_url(video_id, url), download=True)
         path = None
         for d in info.get("requested_downloads") or []:
             path = d.get("filepath") or path
         path = path or ydl.prepare_filename(info)
     if not path or not os.path.exists(path):
         # merged file may have a different extension
+        raw_id = video_id[3:] if video_id.startswith("fb_") else video_id
         for f in os.listdir(out_dir):
-            if f"[{video_id}]" in f:
+            if f"[{raw_id}]" in f:
                 path = os.path.join(out_dir, f)
                 break
     if not path or not os.path.exists(path):
@@ -240,7 +260,8 @@ def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None) 
 # Download history: every video is downloaded only once
 # --------------------------------------------------------------------------- #
 HISTORY_FILE = os.path.join(SAVE_DIR, ".downloaded.json")
-MEDIA_RE = re.compile(r"\[([A-Za-z0-9_-]{11})\]\.(mp4|m4a|webm|mkv|mp3|opus)$", re.I)
+# "<title> [<id>].<ext>" — 11 chars = YouTube, 12+ digits = Facebook
+MEDIA_RE = re.compile(r"\[([A-Za-z0-9_-]{11}|\d{12,30})\]\.(mp4|m4a|webm|mkv|mp3|opus)$", re.I)
 history = {}                 # video_id -> {"path", "title", "channel", "at"}
 history_lock = threading.Lock()
 in_flight = {}               # video_id -> threading.Event (download running right now)
@@ -271,6 +292,8 @@ def load_history():
                 if not m:
                     continue
                 vid, path = m.group(1), os.path.join(root, f)
+                if len(vid) >= 12:
+                    vid = "fb_" + vid
                 entry = history.get(vid)
                 if not entry or not os.path.exists(entry.get("path", "")):
                     history[vid] = {"path": path, "title": f[: m.start()].strip(),
@@ -287,7 +310,7 @@ def existing_file(video_id: str):
     return None
 
 
-def ensure_downloaded(video_id, folder, quality, title="", channel="", progress_hook=None):
+def ensure_downloaded(video_id, folder, quality, title="", channel="", progress_hook=None, url=None):
     """Download a video unless it was downloaded before. Returns (path, "done"|"skipped")."""
     while True:
         with history_lock:
@@ -303,7 +326,7 @@ def ensure_downloaded(video_id, folder, quality, title="", channel="", progress_
             continue
         try:
             os.makedirs(folder, exist_ok=True)
-            path = download_one(video_id, folder, quality, progress_hook)
+            path = download_one(video_id, folder, quality, progress_hook, url)
             with history_lock:
                 history[video_id] = {"path": path, "title": title, "channel": channel, "at": time.time()}
                 _save_history()
@@ -338,7 +361,8 @@ def run_job(job_id: str):
                 item["progress"] = 100
 
         try:
-            path, how = ensure_downloaded(vid, folder, job["quality"], item["title"], job["channel"], hook)
+            path, how = ensure_downloaded(vid, folder, job["quality"], item["title"], job["channel"], hook,
+                                          item.get("url"))
             item.update(status=how, progress=100, path=path, file=os.path.basename(path))
             with lock:
                 job["done"] += 1
@@ -428,14 +452,14 @@ def api_shorts():
 @app.post("/api/download/<video_id>")
 def api_download_single(video_id):
     """Save one short to the channel folder (skipped if it was downloaded before)."""
-    if not VIDEO_ID_RE.match(video_id):
+    if not ITEM_ID_RE.match(video_id):
         abort(400)
     data = request.get_json(silent=True) or {}
     quality = data.get("quality") if data.get("quality") in QUALITY_FORMATS else "best"
     channel = safe_filename(str(data.get("channel") or ""), "channel")
     try:
         path, how = ensure_downloaded(video_id, os.path.join(TAB_DIRS[tab_of(data.get("type"))], channel), quality,
-                                      str(data.get("title") or "")[:200], channel)
+                                      str(data.get("title") or "")[:200], channel, url=data.get("url"))
     except Exception as exc:
         return jsonify(error=str(exc).replace("ERROR: ", "")[:300]), 502
     return jsonify(status=how, file=os.path.basename(path), folder=os.path.dirname(path))
@@ -444,16 +468,110 @@ def api_download_single(video_id):
 @app.get("/api/file/<video_id>")
 def api_get_file(video_id):
     """Send an already-downloaded file to the browser (e.g. when using the site from a phone)."""
-    path = existing_file(video_id) if VIDEO_ID_RE.match(video_id) else None
+    path = existing_file(video_id) if ITEM_ID_RE.match(video_id) else None
     if not path:
         abort(404)
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
+# --------------------------------------------------------------------------- #
+# Facebook: one or many Reel / video links
+# --------------------------------------------------------------------------- #
+def fb_links(text: str):
+    """Pull every Facebook link out of pasted text (one per line, or mixed with other text)."""
+    out = []
+    for u in FB_URL_RE.findall(text or ""):
+        u = u.rstrip(").,;!]}>")
+        if not u.lower().startswith("http"):
+            u = "https://" + u
+        out.append(u)
+    return list(dict.fromkeys(out))
+
+
+def fb_friendly_error(msg: str) -> str:
+    low = msg.lower()
+    if any(k in low for k in ("login", "log in", "logged", "private", "cookies", "registered", "only available",
+                              "not available", "unavailable", "permission")):
+        return "ভিডিওটা প্রাইভেট বা লগইন ছাড়া দেখা যায় না"
+    if "unsupported url" in low or "no video" in low:
+        return "এই লিঙ্কে কোনো ভিডিও পাওয়া যায়নি"
+    return msg[:200]
+
+
+def fb_lookup(url: str):
+    """Read one Facebook link (no download). Returns a card dict."""
+    opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True}
+    with yt_dlp.YoutubeDL(opts) as ydl:
+        info = ydl.extract_info(url, download=False)
+    if info.get("_type") in ("playlist", "multi_video"):   # a post with several videos: take the first
+        info = next((e for e in info.get("entries") or [] if e), None) or {}
+    raw_id = str(info.get("id") or "")
+    if not raw_id.isdigit() or not 12 <= len(raw_id) <= 30:
+        raise RuntimeError("এই লিঙ্কে কোনো ভিডিও পাওয়া যায়নি")
+    page = info.get("webpage_url") or url
+    w, h, dur = info.get("width") or 0, info.get("height") or 0, info.get("duration") or 0
+    is_reel = "/reel" in url.lower() or "/reel" in page.lower() or (
+        "/videos/" not in url.lower() and "watch" not in url.lower() and h > w > 0 and 0 < dur <= 90)
+    title = (info.get("title") or "").strip()
+    uploader = info.get("uploader") or info.get("channel") or ""
+    generic = (not title or title == uploader or len(title) < 4
+               or re.match(r"^(video|reels?|watch)\b.*\bby\b|.*\|\s*facebook$", title, re.I))
+    if generic:   # Facebook often titles things "Video by <page>": use the post text instead
+        desc = (info.get("description") or "").strip().split("\n")[0][:100]
+        title = desc or title or "Facebook video"
+    return {
+        "id": "fb_" + raw_id,
+        "title": title[:200],
+        "thumbnail": info.get("thumbnail") or (best_thumb(info) if info.get("thumbnails") else None),
+        "views": info.get("view_count"),
+        "duration": dur or None,
+        "url": page if is_fb_url(page) else url,
+        "uploader": info.get("uploader") or info.get("channel") or "",
+        "reel": is_reel,
+    }
+
+
+@app.post("/api/fb/list")
+def api_fb_list():
+    data = request.get_json(silent=True) or {}
+    want = data.get("type") if data.get("type") in ("fb_reels", "fb_videos") else "fb_reels"
+    links = fb_links(str(data.get("links") or ""))[:MAX_SHORTS]
+    if not links:
+        return jsonify(error="কোনো ফেসবুক লিঙ্ক পাওয়া যায়নি। facebook.com/reel/… বা …/videos/… লিঙ্ক দিন।"), 400
+
+    def one(u):
+        try:
+            return fb_lookup(u), None
+        except Exception as exc:
+            return None, {"url": u, "error": fb_friendly_error(str(exc).replace("ERROR: ", ""))}
+
+    items, failed, seen = [], [], set()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        for item, err in pool.map(one, links):
+            if err:
+                failed.append(err)
+            elif item["id"] not in seen:
+                seen.add(item["id"])
+                items.append(item)
+    if not items:
+        msg = failed[0]["error"] if failed else "কোনো ভিডিও পাওয়া যায়নি"
+        return jsonify(error=f"কোনো লিঙ্ক খোলা যায়নি — {msg}", failed=failed), 502
+
+    # all Reels -> Reels tab, all regular videos -> Videos tab, mixed -> the tab the user picked
+    reels = sum(1 for i in items if i["reel"])
+    tab = "fb_reels" if reels == len(items) else "fb_videos" if reels == 0 else want
+    uploaders = [i["uploader"] for i in items if i["uploader"]]
+    page = max(set(uploaders), key=uploaders.count) if uploaders else "Facebook"
+    for i in items:
+        i["downloaded"] = i["id"] in history
+    return jsonify(channel={"title": page}, shorts=items, count=len(items), type=tab, failed=failed,
+                   downloaded=sum(i["downloaded"] for i in items))
+
+
 @app.post("/api/jobs")
 def api_create_job():
     data = request.get_json(silent=True) or {}
-    ids = [v for v in data.get("ids", []) if isinstance(v, str) and VIDEO_ID_RE.match(v)]
+    ids = [v for v in data.get("ids", []) if isinstance(v, str) and ITEM_ID_RE.match(v)]
     ids = list(dict.fromkeys(ids))  # dedupe, keep order
     if not ids:
         return jsonify(error="No shorts selected."), 400
@@ -461,6 +579,7 @@ def api_create_job():
         return jsonify(error=f"You can download at most {MAX_PER_JOB} shorts at once."), 400
 
     titles = data.get("titles") or {}
+    urls = data.get("urls") or {}
     job_id = uuid.uuid4().hex
     channel_name = safe_filename(str(data.get("channel") or ""), "channel")
     job = {
@@ -468,7 +587,8 @@ def api_create_job():
         "name": str(data.get("name") or "shorts")[:100],
         "quality": data.get("quality") if data.get("quality") in QUALITY_FORMATS else "best",
         "ids": ids,
-        "items": {v: {"id": v, "title": str(titles.get(v, v))[:200], "status": "queued", "progress": 0}
+        "items": {v: {"id": v, "title": str(titles.get(v, v))[:200], "status": "queued", "progress": 0,
+                      "url": urls.get(v) if is_fb_url(urls.get(v)) else None}
                   for v in ids},
         "status": "running",
         "done": 0,
@@ -532,7 +652,7 @@ def api_zip_downloaded():
     """ZIP every already-downloaded short in the given list (works any time, even after cancel)."""
     raw = request.form.get("ids") or (request.get_json(silent=True) or {}).get("ids") or ""
     ids = raw.split(",") if isinstance(raw, str) else raw
-    paths = [p for p in (existing_file(v) for v in ids if isinstance(v, str) and VIDEO_ID_RE.match(v)) if p]
+    paths = [p for p in (existing_file(v) for v in ids if isinstance(v, str) and ITEM_ID_RE.match(v)) if p]
     if not paths:
         return jsonify(error="এখনো কোনো ভিডিও নামানো হয়নি।"), 404
     name = safe_filename(request.form.get("name") or "shorts", "shorts") + ".zip"
@@ -571,5 +691,6 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     print(f"\n  ▶  Open http://localhost:{port} in your browser")
     print(f"  ▶  Shorts are saved to: {SAVE_DIR}")
-    print(f"  ▶  Videos are saved to: {VIDEOS_DIR}\n")
+    print(f"  ▶  Videos are saved to: {VIDEOS_DIR}")
+    print(f"  ▶  Facebook Reels / Videos: {FB_REELS_DIR} / {FB_VIDEOS_DIR}\n")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

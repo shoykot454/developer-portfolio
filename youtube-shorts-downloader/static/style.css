@@ -42,6 +42,17 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 6px; font-si
 .sub { color: var(--muted); max-width: 640px; margin: 0 auto 26px; }
 .hint { color: var(--muted); font-size: 13px; margin-top: 12px; }
 
+.platforms { display: flex; justify-content: center; gap: 10px; margin: 0 auto 14px; flex-wrap: wrap; }
+.plat {
+  background: var(--panel); color: var(--muted); border: 1px solid var(--line); padding: 10px 22px; font-size: 15px;
+}
+.plat svg { flex: none; }
+.plat.yt.active { background: #ff0033; border-color: #ff0033; color: #fff; }
+.plat.fb.active { background: #1877f2; border-color: #1877f2; color: #fff; }
+.plat:not(.active):hover { color: var(--text); border-color: var(--muted); }
+body.fb .tab.active, body.fb .search button, body.fb .primary { background: linear-gradient(135deg, #1877f2, #3b8cff); }
+body.fb .bar span { background: linear-gradient(90deg, #1877f2, #3b8cff); }
+body.fb .pick input { accent-color: #1877f2; }
 .tabs {
   display: inline-flex; gap: 4px; padding: 4px; margin: 0 auto 16px;
   background: var(--panel); border: 1px solid var(--line); border-radius: 999px;
@@ -53,10 +64,29 @@ code { background: var(--panel-2); padding: 1px 6px; border-radius: 6px; font-si
   display: flex; gap: 8px; max-width: 720px; margin: 0 auto;
   background: var(--panel); border: 1px solid var(--line); border-radius: 999px; padding: 6px;
 }
-.search input {
+.search input, .search textarea {
   flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text);
   font: inherit; padding: 10px 16px;
 }
+.search textarea { resize: vertical; min-height: 96px; font-size: 14px; line-height: 1.5; }
+.search.multi { border-radius: var(--radius); align-items: flex-end; }
+.search.multi button { margin: 0 0 4px; }
+.help {
+  max-width: 720px; margin: 14px auto 0; text-align: left; background: var(--panel);
+  border: 1px solid var(--line); border-radius: var(--radius); padding: 12px 16px;
+}
+.help summary { cursor: pointer; font-weight: 600; }
+.help-body { color: var(--muted); font-size: 14px; }
+.help-body ol { padding-left: 20px; margin: 8px 0 0; }
+.help-body li { margin-bottom: 8px; }
+.help-body b { color: var(--text); }
+.bm {
+  display: inline-block; margin: 6px 8px 2px 0; padding: 6px 14px; border-radius: 999px; cursor: grab;
+  background: #1877f2; color: #fff; font-weight: 600; text-decoration: none;
+}
+.help small { display: block; }
+.failed { text-align: left; margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
+.failed li { word-break: break-all; }
 button, .btn {
   font: 600 14px "Hind Siliguri", "Inter", sans-serif; cursor: pointer; border-radius: 999px;
   border: 1px solid transparent; padding: 10px 18px; text-decoration: none; display: inline-flex;
@@ -149,6 +179,8 @@ select {
 @media (max-width: 560px) {
   .search { flex-direction: column; border-radius: var(--radius); }
   .search button { width: 100%; }
+  .search.multi { align-items: stretch; }
+  .search.multi button { margin: 4px 0 0; }
   .grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
   .grid.landscape { grid-template-columns: 1fr; }
   .actions { width: 100%; }
