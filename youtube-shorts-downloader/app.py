@@ -43,7 +43,22 @@ JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "21600"))
 
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
+APP_VERSION = "3.0 · YouTube + Facebook"
+
 app = Flask(__name__, static_folder="static", static_url_path="/static")
+
+
+@app.after_request
+def no_stale_pages(resp):
+    """Never let the browser keep an old copy of the page after an update."""
+    if request.path == "/" or request.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache, must-revalidate"
+    return resp
+
+
+@app.get("/api/version")
+def api_version():
+    return jsonify(version=APP_VERSION)
 
 VIDEO_ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")             # YouTube video id
 ITEM_ID_RE = re.compile(r"^(?:[A-Za-z0-9_-]{11}|fb_\d{12,30})$")  # YouTube id or "fb_<facebook id>"
@@ -689,7 +704,8 @@ def api_job_open_folder(job_id):
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    print(f"\n  ▶  Open http://localhost:{port} in your browser")
+    print(f"\n  ▶  Video Downloader — version {APP_VERSION}")
+    print(f"  ▶  Open http://localhost:{port} in your browser")
     print(f"  ▶  Shorts are saved to: {SAVE_DIR}")
     print(f"  ▶  Videos are saved to: {VIDEOS_DIR}")
     print(f"  ▶  Facebook Reels / Videos: {FB_REELS_DIR} / {FB_VIDEOS_DIR}\n")

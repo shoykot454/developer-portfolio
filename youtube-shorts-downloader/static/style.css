@@ -174,6 +174,7 @@ select {
 .state.err { color: var(--err); }
 .state.run { color: var(--muted); }
 
+.ver { display: block; margin-top: 6px; font-size: 12px; opacity: .8; }
 .foot { text-align: center; color: var(--muted); font-size: 13px; padding: 20px 16px; border-top: 1px solid var(--line); }
 
 @media (max-width: 560px) {
