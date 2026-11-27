@@ -43,7 +43,7 @@ JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "21600"))
 
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
-APP_VERSION = "3.0 · YouTube + Facebook"
+APP_VERSION = "3.1 · YouTube + Facebook"
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
@@ -702,10 +702,28 @@ def api_job_open_folder(job_id):
     return jsonify(ok=True)
 
 
+def _already_running(port: int) -> bool:
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.5)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
 if __name__ == "__main__":
+    import webbrowser
     port = int(os.environ.get("PORT", "5000"))
+    url = f"http://localhost:{port}"
+    open_browser = os.environ.get("OPEN_BROWSER") == "1"   # set by "Start Downloader.bat"
+    if _already_running(port):
+        # double-clicked again while it is already running: just show the page
+        print(f"\n  ▶  The downloader is already running — opening {url}\n")
+        if open_browser:
+            webbrowser.open(url)
+        sys.exit(0)
+    if open_browser:
+        threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     print(f"\n  ▶  Video Downloader — version {APP_VERSION}")
-    print(f"  ▶  Open http://localhost:{port} in your browser")
+    print(f"  ▶  Open {url} in your browser  (keep this window open while you use it)")
     print(f"  ▶  Shorts are saved to: {SAVE_DIR}")
     print(f"  ▶  Videos are saved to: {VIDEOS_DIR}")
     print(f"  ▶  Facebook Reels / Videos: {FB_REELS_DIR} / {FB_VIDEOS_DIR}\n")
