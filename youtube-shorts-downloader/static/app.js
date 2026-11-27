@@ -5,7 +5,7 @@
   const selectAll = $("#selectAll"), quality = $("#quality"), dlAll = $("#dlAll");
   const jobBox = $("#job"), jobText = $("#jobText"), jobBar = $("#jobBar");
   const zipLink = $("#zipLink"), cancelBtn = $("#cancelJob");
-  const openFolder = $("#openFolder"), jobFolder = $("#jobFolder");
+  const openFolder = $("#openFolder"), jobFolder = $("#jobFolder"), zipAll = $("#zipAll");
   const tpl = $("#cardTpl");
 
   let shorts = [], channel = {}, cards = new Map(), pollTimer = null, jobId = null;
@@ -97,6 +97,9 @@
   function updateCount() {
     const n = selectedIds().length;
     dlAll.textContent = `সিলেক্টেড ${n} টি ডাউনলোড`;
+    const had = shorts.filter((s) => s.downloaded).length;
+    zipAll.hidden = had === 0;
+    zipAll.textContent = `📦 নামানো ${had} টি ZIP হিসেবে নিন`;
     dlAll.disabled = n === 0 || !!jobId;
     const fresh = shorts.filter((s) => !cards.get(s.id).classList.contains("had"));
     const freshSel = fresh.filter((s) => cards.get(s.id).querySelector(".pick input").checked).length;
@@ -119,6 +122,25 @@
     el.textContent = text || "";
     el.className = "state" + (cls ? " " + cls : "");
   }
+
+  // ZIP of everything already downloaded from this channel — works any time (even after cancel).
+  zipAll.addEventListener("click", () => {
+    const ids = shorts.filter((s) => s.downloaded).map((s) => s.id);
+    if (!ids.length) return;
+    const form = document.createElement("form");
+    form.method = "POST";
+    form.action = "/api/zip";
+    for (const [k, v] of [["ids", ids.join(",")], ["name", `${channel.title || "channel"} shorts`]]) {
+      const input = document.createElement("input");
+      input.type = "hidden"; input.name = k; input.value = v;
+      form.appendChild(input);
+    }
+    document.body.appendChild(form);
+    form.submit();
+    form.remove();
+    showStatus(`<span class="spinner"></span>${ids.length} টি ভিডিওর ZIP বানানো হচ্ছে… বড় হলে কয়েক মিনিট লাগতে পারে, তারপর ডাউনলোড নিজে থেকে শুরু হবে।`);
+    setTimeout(hideStatus, 15000);
+  });
 
   // Single download: saved to the channel folder; skipped if it was downloaded before.
   async function downloadSingle(s, node) {
@@ -201,6 +223,7 @@
       }
       jobFolder.hidden = false;
       jobFolder.textContent = "সেভ হচ্ছে: " + job.folder;
+      updateCount();
       const finished = job.done + job.failed;
       jobBar.style.width = `${((finished + partial) / job.total) * 100}%`;
       const failTxt = job.failed ? ` · ${job.failed} টি ব্যর্থ` : "";
@@ -219,7 +242,16 @@
           zipLink.href = `/api/jobs/${job.id}/zip`;
           zipLink.hidden = false;
         } else if (job.status === "cancelled") {
-          jobText.textContent = "বাতিল করা হয়েছে";
+          jobText.textContent = job.done
+            ? `বাতিল করা হয়েছে — তার আগে ${job.done} টি সেভ হয়েছে`
+            : "বাতিল করা হয়েছে";
+          if (job.done) {
+            jobFolder.textContent = "ফোল্ডার: " + job.folder;
+            openFolder.hidden = false;
+            openFolder.onclick = () => fetch(`/api/jobs/${job.id}/open`, { method: "POST" });
+            zipLink.href = `/api/jobs/${job.id}/zip`;
+            zipLink.hidden = false;
+          }
         } else {
           jobText.textContent = "কোনো ভিডিও ডাউনলোড করা যায়নি";
         }

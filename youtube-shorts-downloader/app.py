@@ -490,10 +490,29 @@ def api_job_cancel(job_id):
 @app.get("/api/jobs/<job_id>/zip")
 def api_job_zip(job_id):
     job = jobs.get(job_id)
-    if not job or job["status"] != "finished":
+    if not job or job["status"] not in ("finished", "cancelled") or not job["done"]:
         abort(404)
     path = build_zip(job)
     return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+
+
+@app.post("/api/zip")
+def api_zip_downloaded():
+    """ZIP every already-downloaded short in the given list (works any time, even after cancel)."""
+    raw = request.form.get("ids") or (request.get_json(silent=True) or {}).get("ids") or ""
+    ids = raw.split(",") if isinstance(raw, str) else raw
+    paths = [p for p in (existing_file(v) for v in ids if isinstance(v, str) and VIDEO_ID_RE.match(v)) if p]
+    if not paths:
+        return jsonify(error="এখনো কোনো ভিডিও নামানো হয়নি।"), 404
+    name = safe_filename(request.form.get("name") or "shorts", "shorts") + ".zip"
+    tmp = tempfile.mkdtemp(dir=DOWNLOAD_ROOT)
+    zip_path = os.path.join(tmp, name)
+    with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
+        for p in dict.fromkeys(paths):
+            zf.write(p, arcname=os.path.basename(p))
+    response = send_file(zip_path, as_attachment=True, download_name=name)
+    response.call_on_close(lambda: shutil.rmtree(tmp, ignore_errors=True))
+    return response
 
 
 @app.post("/api/jobs/<job_id>/open")
