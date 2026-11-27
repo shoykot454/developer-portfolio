@@ -139,11 +139,17 @@ d.querySelector('#x').onclick=()=>d.remove()})()`;
       render();
       if (data.failed && data.failed.length) showFailed(data.failed);
     } catch (err) {
-      showStatus(escapeHtml(err.message), true);
+      showStatus(escapeHtml(friendly(err)), true);
     } finally {
       goBtn.disabled = false;
     }
   });
+
+  // "Failed to fetch" means the Python program is not running (its black window was closed).
+  const friendly = (err) =>
+    err instanceof TypeError || /Failed to fetch|NetworkError|Load failed/i.test(err.message)
+      ? "সার্ভার চলছে না — Desktop-এর Video Downloader আইকনে আবার ডাবল ক্লিক করুন (কালো জানালাটা খোলা রাখবেন)।"
+      : /Unexpected token|JSON/i.test(err.message) ? "সার্ভার থেকে ভুল উত্তর এসেছে — আবার চেষ্টা করুন।" : err.message;
 
   const escapeHtml = (t) => String(t).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   function showFailed(failed) {
@@ -169,9 +175,16 @@ d.querySelector('#x').onclick=()=>d.remove()})()`;
       const node = tpl.content.firstElementChild.cloneNode(true);
       node.querySelector(".thumb").href = s.url;
       const img = node.querySelector("img");
-      img.src = s.thumbnail || `https://i.ytimg.com/vi/${s.id}/hqdefault.jpg`;
+      const isYT = !s.id.startsWith("fb_");
+      const ytThumb = `https://i.ytimg.com/vi/${s.id}/hqdefault.jpg`;
+      const noImg = () => node.querySelector(".thumb").classList.add("noimg");
       img.alt = s.title;
-      img.onerror = () => { img.onerror = null; img.src = `https://i.ytimg.com/vi/${s.id}/hqdefault.jpg`; };
+      img.onerror = () => {
+        if (isYT && img.src !== ytThumb) img.src = ytThumb;
+        else { img.onerror = null; noImg(); }
+      };
+      if (s.thumbnail || isYT) img.src = s.thumbnail || ytThumb;
+      else noImg();
       node.querySelector(".dur").textContent = fmtDur(s.duration);
       node.querySelector(".title").textContent = s.title;
       node.querySelector(".title").title = s.title;
@@ -234,6 +247,7 @@ d.querySelector('#x').onclick=()=>d.remove()})()`;
     const form = document.createElement("form");
     form.method = "POST";
     form.action = "/api/zip";
+    form.target = "dlframe";
     for (const [k, v] of [["ids", ids.join(",")], ["name", `${channel.title || "channel"} ${listed}`]]) {
       const input = document.createElement("input");
       input.type = "hidden"; input.name = k; input.value = v;
@@ -268,7 +282,7 @@ d.querySelector('#x').onclick=()=>d.remove()})()`;
       node.querySelector(".state").appendChild(link);
       updateCount();
     } catch (err) {
-      setCardState(node, "✗ " + err.message, "err");
+      setCardState(node, "✗ " + friendly(err), "err");
     } finally {
       btn.disabled = false;
     }
@@ -300,16 +314,24 @@ d.querySelector('#x').onclick=()=>d.remove()})()`;
       ids.forEach((id) => setCardState(cards.get(id), "অপেক্ষায়…", "run"));
       poll();
     } catch (err) {
-      showStatus(err.message, true);
+      showStatus(escapeHtml(friendly(err)), true);
       updateCount();
     }
   });
 
+  let pollMisses = 0;
   async function poll() {
     clearTimeout(pollTimer);
     if (!jobId) return;
     try {
-      const res = await fetch(`/api/jobs/${jobId}`);
+      let res;
+      try {
+        res = await fetch(`/api/jobs/${jobId}`);
+      } catch (netErr) {            // brief hiccup: keep trying for ~30 s before giving up
+        if (++pollMisses <= 10) { pollTimer = setTimeout(poll, 3000); return; }
+        throw netErr;
+      }
+      pollMisses = 0;
       const job = await res.json();
       if (!res.ok) throw new Error(job.error || "Job lost");
 
@@ -357,12 +379,13 @@ d.querySelector('#x').onclick=()=>d.remove()})()`;
             zipLink.hidden = false;
           }
         } else {
-          jobText.textContent = "কোনো ভিডিও ডাউনলোড করা যায়নি";
+          jobText.textContent = "কোনো ভিডিও ডাউনলোড করা যায়নি — কার্ডে কারণ লেখা আছে, একটু পরে আবার চেষ্টা করুন";
+          jobFolder.hidden = true;
         }
         return;
       }
     } catch (err) {
-      jobText.textContent = err.message;
+      jobText.textContent = friendly(err);
       endJob();
       return;
     }

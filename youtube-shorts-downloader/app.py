@@ -43,7 +43,7 @@ JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "21600"))
 
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
-APP_VERSION = "3.1 · YouTube + Facebook"
+APP_VERSION = "3.2 · YouTube + Facebook"
 
 app = Flask(__name__, static_folder="static", static_url_path="/static")
 
@@ -72,6 +72,15 @@ QUALITY_FORMATS = {
     "480": ("bv*+ba/b", ["res:480", "ext:mp4:m4a"]),
     "audio": ("ba[ext=m4a]/ba", []),
 }
+
+
+# YouTube needs a JavaScript runtime for full-quality downloads. yt-dlp uses the first one
+# installed on this computer (Deno is installed by "Start Downloader.bat"); missing ones are skipped.
+YDL_BASE = {"js_runtimes": {"deno": {}, "node": {}, "bun": {}, "quickjs": {}}}
+
+
+def ydl(opts: dict):
+    return yt_dlp.YoutubeDL({**YDL_BASE, **opts})
 
 
 def tab_of(value) -> str:
@@ -154,9 +163,13 @@ def best_thumb(entry):
     return f"https://i.ytimg.com/vi/{vid}/hqdefault.jpg" if vid else None
 
 
-def safe_filename(name: str, fallback: str) -> str:
+def safe_filename(name: str, fallback: str, limit: int = 60) -> str:
+    """Make a Windows-safe file/folder name (short, so full paths stay under 260 characters)."""
     name = re.sub(r'[\\/:*?"<>|\r\n\t]+', " ", name or "").strip()
-    name = re.sub(r"\s+", " ", name)[:120].strip(" .")
+    name = re.sub(r"\s+", " ", name)[:limit].strip(" .")
+    if name.upper().split(".")[0] in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                                      *(f"LPT{i}" for i in range(1, 10))}:
+        name = "_" + name               # names Windows reserves
     return name or fallback
 
 
@@ -171,8 +184,8 @@ def list_channel_shorts(shorts_url: str, limit: int, tab: str = "shorts"):
         "skip_download": True,
         "playlistend": limit,
     }
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(shorts_url, download=False)
+    with ydl(opts) as y:
+        info = y.extract_info(shorts_url, download=False)
 
     channel = {
         "title": info.get("channel") or info.get("uploader") or info.get("title") or "",
@@ -210,8 +223,8 @@ def detect_tab(info, is_shorts_link: bool) -> str:
 def get_single_video(video_id: str, is_shorts_link: bool = False):
     """Look up one video. Returns (channel, [video], tab) — tab says where it gets saved."""
     opts = {"quiet": True, "no_warnings": True, "skip_download": True}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(video_url(video_id, "videos"), download=False)
+    with ydl(opts) as y:
+        info = y.extract_info(video_url(video_id, "videos"), download=False)
     tab = detect_tab(info, is_shorts_link)
     channel = {
         "title": info.get("channel") or info.get("uploader") or "",
@@ -240,7 +253,7 @@ def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None, 
         "no_warnings": True,
         "format": fmt,
         "format_sort": sort,
-        "outtmpl": os.path.join(out_dir, "%(title).100B [%(id)s].%(ext)s"),
+        "outtmpl": os.path.join(out_dir, "%(title).80B [%(id)s].%(ext)s"),  # short: Windows path limit
         "noplaylist": True,
         "restrictfilenames": False,
         "windowsfilenames": True,
@@ -253,12 +266,12 @@ def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None, 
     if progress_hook:
         opts["progress_hooks"] = [progress_hook]
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(source_url(video_id, url), download=True)
+    with ydl(opts) as y:
+        info = y.extract_info(source_url(video_id, url), download=True)
         path = None
         for d in info.get("requested_downloads") or []:
             path = d.get("filepath") or path
-        path = path or ydl.prepare_filename(info)
+        path = path or y.prepare_filename(info)
     if not path or not os.path.exists(path):
         # merged file may have a different extension
         raw_id = video_id[3:] if video_id.startswith("fb_") else video_id
@@ -457,7 +470,9 @@ def api_shorts():
         if "does not have a" in msg.lower():
             what = "লম্বা ভিডিও" if tab == "videos" else "Shorts"
             return jsonify(error=f"এই চ্যানেলে কোনো {what} নেই।"), 404
-        return jsonify(error=f"Couldn't read that channel: {msg[:300]}"), 502
+        return jsonify(error=f"চ্যানেলটা পড়া যায়নি: {msg[:300]}"), 502
+    except Exception as exc:  # anything unexpected: still answer with a readable message
+        return jsonify(error=f"সমস্যা হয়েছে: {str(exc)[:300]}"), 500
     for sh in shorts:
         sh["downloaded"] = sh["id"] in history
     return jsonify(channel=channel, shorts=shorts, count=len(shorts), type=tab, single=kind == "video",
@@ -516,8 +531,8 @@ def fb_friendly_error(msg: str) -> str:
 def fb_lookup(url: str):
     """Read one Facebook link (no download). Returns a card dict."""
     opts = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True}
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
+    with ydl(opts) as y:
+        info = y.extract_info(url, download=False)
     if info.get("_type") in ("playlist", "multi_video"):   # a post with several videos: take the first
         info = next((e for e in info.get("entries") or [] if e), None) or {}
     raw_id = str(info.get("id") or "")
@@ -702,11 +717,19 @@ def api_job_open_folder(job_id):
     return jsonify(ok=True)
 
 
-def _already_running(port: int) -> bool:
+def _port_status(port: int) -> str:
+    """'free', 'ours' (this downloader already runs there) or 'other' (another program uses it)."""
     import socket
+    import urllib.request
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.5)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
+        if sock.connect_ex(("127.0.0.1", port)) != 0:
+            return "free"
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{port}/api/version", timeout=2) as r:
+            return "ours" if "version" in json.loads(r.read().decode("utf-8")) else "other"
+    except Exception:
+        return "other"
 
 
 if __name__ == "__main__":
@@ -714,12 +737,20 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
     url = f"http://localhost:{port}"
     open_browser = os.environ.get("OPEN_BROWSER") == "1"   # set by "Start Downloader.bat"
-    if _already_running(port):
+    status = _port_status(port)
+    if status == "ours":
         # double-clicked again while it is already running: just show the page
         print(f"\n  ▶  The downloader is already running — opening {url}\n")
         if open_browser:
             webbrowser.open(url)
         sys.exit(0)
+    if status == "other":
+        busy = port
+        port += 1
+        while _port_status(port) != "free" and port < 5100:
+            port += 1
+        url = f"http://localhost:{port}"
+        print(f"\n  ▶  Port {busy} is used by another program, using {url} instead.")
     if open_browser:
         threading.Timer(1.5, lambda: webbrowser.open(url)).start()
     print(f"\n  ▶  Video Downloader — version {APP_VERSION}")

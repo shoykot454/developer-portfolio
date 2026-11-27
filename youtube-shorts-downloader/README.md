@@ -35,7 +35,8 @@
 ffmpeg না থাকলে সতর্ক করে। সাইট আগে থেকে চালু থাকলে আবার চালু না করে শুধু ব্রাউজার খোলে।
 
 ## চালানোর নিয়ম
-দরকার: **Python 3.9+** আর **ffmpeg** (ভিডিও আর অডিও জোড়া লাগাতে লাগে)।
+দরকার: **Python 3.9+**, **ffmpeg** (ভিডিও আর অডিও জোড়া লাগাতে লাগে) আর **Deno**
+(YouTube-এর পুরো কোয়ালিটির জন্য yt-dlp-এর লাগে; `Start Downloader.bat` নিজে ইনস্টল করে, হাতে করতে চাইলে `winget install DenoLand.Deno`)।
 
 ```bash
 cd youtube-shorts-downloader

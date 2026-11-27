@@ -26,6 +26,22 @@ echo  Fix: open Command Prompt and run:  winget install ffmpeg
 echo.
 
 :have_ffmpeg
+rem ---- YouTube needs a JavaScript runtime (Deno) for full-quality downloads ----
+set "PATH=%PATH%;%LOCALAPPDATA%\Microsoft\WinGet\Links;%USERPROFILE%\.deno\bin"
+where deno >nul 2>nul
+if not errorlevel 1 goto have_js
+where node >nul 2>nul
+if not errorlevel 1 goto have_js
+echo  Installing Deno - YouTube needs it for HD downloads. This happens only once...
+winget install --id DenoLand.Deno -e --silent --accept-source-agreements --accept-package-agreements >nul 2>nul
+where deno >nul 2>nul
+if not errorlevel 1 goto have_js
+echo.
+echo  WARNING: Deno could not be installed. YouTube may give lower quality.
+echo  Fix: open Command Prompt and run:  winget install DenoLand.Deno
+echo.
+
+:have_js
 rem ---- first run: install Flask and yt-dlp ----
 %PY% -c "import flask, yt_dlp" >nul 2>nul
 if not errorlevel 1 goto have_packages
@@ -35,7 +51,7 @@ if errorlevel 1 goto pip_failed
 
 :have_packages
 echo  Checking for yt-dlp updates...
-%PY% -m pip install -U -q yt-dlp >nul 2>nul
+%PY% -m pip install -U -q "yt-dlp[default]" >nul 2>nul
 
 set "OPEN_BROWSER=1"
 %PY% app.py
