@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="bn">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Shorts Downloader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="logo" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path fill="currentColor" d="M10 15.5v-7l6 3.5-6 3.5Z"/><path fill="none" stroke="currentColor" stroke-width="2" d="M17 3H7a4 4 0 0 0-4 4v10a4 4 0 0 0 4 4h10a4 4 0 0 0 4-4V7a4 4 0 0 0-4-4Z"/></svg>
+      </span>
+      Shorts Downloader
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section class="hero">
+      <h1>চ্যানেলের সব Shorts এক ক্লিকে ডাউনলোড</h1>
+      <p class="sub">YouTube চ্যানেলের লিঙ্ক বা <code>@handle</code> দিন — সব Shorts দেখাবে, তারপর একটা একটা করে বা সবগুলো একসাথে ZIP হিসেবে নামিয়ে নিন।</p>
+
+      <form id="search" class="search" autocomplete="off">
+        <input id="url" type="text" inputmode="url" placeholder="https://www.youtube.com/@channel  বা  @channel" required />
+        <button id="go" type="submit">Shorts খুঁজুন</button>
+      </form>
+      <p class="hint">চলবে: <code>youtube.com/@name</code>, <code>/channel/UC…</code>, <code>/c/name</code>, অথবা একটা <code>/shorts/…</code> লিঙ্ক</p>
+    </section>
+
+    <div id="status" class="status" hidden></div>
+
+    <section id="results" hidden>
+      <div class="toolbar">
+        <div class="ch">
+          <h2 id="chTitle"></h2>
+          <span id="chCount" class="muted"></span>
+        </div>
+        <div class="actions">
+          <label class="check"><input type="checkbox" id="selectAll" checked /> সব সিলেক্ট</label>
+          <select id="quality" title="Quality">
+            <option value="best">Best quality (MP4)</option>
+            <option value="720">720p (MP4)</option>
+            <option value="480">480p (MP4)</option>
+            <option value="audio">শুধু অডিও (M4A)</option>
+          </select>
+          <button id="dlAll" class="primary">সিলেক্টেড ডাউনলোড (ZIP)</button>
+        </div>
+      </div>
+
+      <div id="job" class="job" hidden>
+        <div class="job-head">
+          <strong id="jobText">ডাউনলোড হচ্ছে…</strong>
+          <div class="job-btns">
+            <a id="zipLink" class="primary btn" hidden>ZIP সেভ করুন</a>
+            <button id="cancelJob" class="ghost">বাতিল</button>
+          </div>
+        </div>
+        <div class="bar"><span id="jobBar"></span></div>
+      </div>
+
+      <div id="grid" class="grid"></div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    শুধু নিজের কনটেন্ট বা যেগুলো ডাউনলোডের অনুমতি আছে সেগুলো ডাউনলোড করুন। কপিরাইট ও YouTube-এর নিয়ম মেনে চলুন।
+  </footer>
+
+  <template id="cardTpl">
+    <article class="card">
+      <label class="pick"><input type="checkbox" checked /></label>
+      <a class="thumb" target="_blank" rel="noopener"><img loading="lazy" alt="" /><span class="dur"></span></a>
+      <div class="meta">
+        <h3 class="title"></h3>
+        <div class="row">
+          <span class="views muted"></span>
+          <button class="dl ghost" type="button">ডাউনলোড</button>
+        </div>
+        <div class="state"></div>
+      </div>
+    </article>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
