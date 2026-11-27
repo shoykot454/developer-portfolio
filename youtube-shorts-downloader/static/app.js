@@ -5,6 +5,7 @@
   const selectAll = $("#selectAll"), quality = $("#quality"), dlAll = $("#dlAll");
   const jobBox = $("#job"), jobText = $("#jobText"), jobBar = $("#jobBar");
   const zipLink = $("#zipLink"), cancelBtn = $("#cancelJob");
+  const openFolder = $("#openFolder"), jobFolder = $("#jobFolder");
   const tpl = $("#cardTpl");
 
   let shorts = [], channel = {}, cards = new Map(), pollTimer = null, jobId = null;
@@ -84,7 +85,7 @@
   }
   function updateCount() {
     const n = selectedIds().length;
-    dlAll.textContent = `সিলেক্টেড ${n} টি ডাউনলোড (ZIP)`;
+    dlAll.textContent = `সিলেক্টেড ${n} টি ডাউনলোড`;
     dlAll.disabled = n === 0 || !!jobId;
     selectAll.checked = n === shorts.length;
     selectAll.indeterminate = n > 0 && n < shorts.length;
@@ -142,13 +143,15 @@
       const res = await fetch("/api/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ids, titles, quality: quality.value, name: `${channel.title || "channel"} shorts` }),
+        body: JSON.stringify({ ids, titles, quality: quality.value, channel: channel.title || "channel", name: `${channel.title || "channel"} shorts` }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Could not start");
       jobId = data.id;
       jobBox.hidden = false;
       zipLink.hidden = true;
+      openFolder.hidden = true;
+      jobFolder.hidden = true;
       cancelBtn.hidden = false;
       jobBar.style.width = "0%";
       jobText.textContent = `ডাউনলোড শুরু হচ্ছে… 0 / ${ids.length}`;
@@ -174,25 +177,29 @@
         const node = cards.get(it.id);
         if (!node) continue;
         if (it.status === "done") setCardState(node, "✓ সম্পন্ন", "ok");
+        else if (it.status === "skipped") setCardState(node, "✓ আগেই নামানো ছিল", "ok");
         else if (it.status === "error") setCardState(node, "✗ " + (it.error || "ব্যর্থ"), "err");
-        else if (it.status === "downloading") { setCardState(node, `ডাউনলোড হচ্ছে… ${Math.round(it.progress || 0)}%`, "run"); partial = (it.progress || 0) / 100; }
+        else if (it.status === "downloading") { setCardState(node, `ডাউনলোড হচ্ছে… ${Math.round(it.progress || 0)}%`, "run"); partial += (it.progress || 0) / 100; }
       }
+      jobFolder.hidden = false;
+      jobFolder.textContent = "সেভ হচ্ছে: " + job.folder;
       const finished = job.done + job.failed;
       jobBar.style.width = `${((finished + partial) / job.total) * 100}%`;
       const failTxt = job.failed ? ` · ${job.failed} টি ব্যর্থ` : "";
 
       if (job.status === "running") {
         jobText.textContent = `ডাউনলোড হচ্ছে… ${finished} / ${job.total}${failTxt}`;
-      } else if (job.status === "zipping") {
-        jobText.textContent = `ZIP বানানো হচ্ছে… (${job.done} টি ফাইল)`;
       } else {
         endJob();
         if (job.status === "finished") {
           jobBar.style.width = "100%";
-          jobText.textContent = `✓ ${job.done} টি Shorts রেডি${failTxt}`;
+          const skipTxt = job.skipped ? ` (${job.skipped} টি আগেই ছিল)` : "";
+          jobText.textContent = `✓ ${job.done} টি Shorts ফোল্ডারে সেভ হয়েছে${skipTxt}${failTxt}`;
+          jobFolder.textContent = "ফোল্ডার: " + job.folder;
+          openFolder.hidden = false;
+          openFolder.onclick = () => fetch(`/api/jobs/${job.id}/open`, { method: "POST" });
           zipLink.href = `/api/jobs/${job.id}/zip`;
           zipLink.hidden = false;
-          zipLink.click(); // start saving automatically
         } else if (job.status === "cancelled") {
           jobText.textContent = "বাতিল করা হয়েছে";
         } else {
@@ -205,7 +212,7 @@
       endJob();
       return;
     }
-    pollTimer = setTimeout(poll, 1200);
+    pollTimer = setTimeout(poll, 1500);
   }
 
   function endJob() {

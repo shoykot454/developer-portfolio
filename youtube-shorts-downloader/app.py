@@ -13,17 +13,23 @@ import shutil
 import tempfile
 import threading
 import time
+import subprocess
+import sys
 import uuid
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, abort, jsonify, request, send_file, send_from_directory
 import yt_dlp
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DOWNLOAD_ROOT = os.environ.get("DOWNLOAD_ROOT") or os.path.join(tempfile.gettempdir(), "shorts-downloader")
-MAX_SHORTS = int(os.environ.get("MAX_SHORTS", "500"))       # max shorts listed per channel
-MAX_PER_JOB = int(os.environ.get("MAX_PER_JOB", "200"))     # max shorts per ZIP job
-JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "3600"))
+# Bulk downloads are saved here, one sub-folder per channel (kept after the app stops).
+SAVE_DIR = os.environ.get("SAVE_DIR") or os.path.join(os.path.expanduser("~"), "Downloads", "YouTube Shorts")
+MAX_SHORTS = int(os.environ.get("MAX_SHORTS", "5000"))      # max shorts listed per channel
+MAX_PER_JOB = int(os.environ.get("MAX_PER_JOB", "5000"))    # max shorts per bulk job
+CONCURRENCY = max(1, int(os.environ.get("CONCURRENCY", "3")))  # parallel downloads
+JOB_TTL_SECONDS = int(os.environ.get("JOB_TTL_SECONDS", "21600"))
 
 os.makedirs(DOWNLOAD_ROOT, exist_ok=True)
 
@@ -204,65 +210,89 @@ def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None) 
     return path
 
 
+def find_existing(folder: str, video_id: str):
+    """Return an already-downloaded file for this video, so re-runs can resume."""
+    if not os.path.isdir(folder):
+        return None
+    for f in os.listdir(folder):
+        if (f"[{video_id}]" in f and not f.endswith((".part", ".ytdl", ".temp"))
+                and not re.search(r"\]\.f\d+\.", f)):  # skip unmerged partial streams
+            return os.path.join(folder, f)
+    return None
+
+
 def run_job(job_id: str):
     job = jobs[job_id]
-    work_dir = job["dir"]
-    files_dir = os.path.join(work_dir, "files")
-    os.makedirs(files_dir, exist_ok=True)
+    folder = job["folder"]
+    os.makedirs(folder, exist_ok=True)
+    lock = threading.Lock()
 
-    for idx, vid in enumerate(job["ids"]):
+    def work(vid):
         if job["cancelled"]:
-            break
+            return
         item = job["items"][vid]
+        existing = find_existing(folder, vid)
+        if existing:
+            item.update(status="skipped", progress=100, file=os.path.basename(existing))
+            with lock:
+                job["done"] += 1
+            return
         item["status"] = "downloading"
-        job["current"] = vid
 
-        def hook(d, item=item):
+        def hook(d):
             if d.get("status") == "downloading":
                 total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
                 done = d.get("downloaded_bytes") or 0
-                item["progress"] = round(done * 100 / total, 1) if total else item.get("progress", 0)
+                if total:
+                    item["progress"] = round(done * 100 / total, 1)
             elif d.get("status") == "finished":
                 item["progress"] = 100
 
         try:
-            path = download_one(vid, files_dir, job["quality"], hook)
-            item["status"] = "done"
-            item["progress"] = 100
-            item["file"] = os.path.basename(path)
-            job["done"] += 1
+            path = download_one(vid, folder, job["quality"], hook)
+            item.update(status="done", progress=100, file=os.path.basename(path))
+            with lock:
+                job["done"] += 1
         except Exception as exc:  # keep going with the rest
             item["status"] = "error"
             item["error"] = str(exc).replace("ERROR: ", "")[:300]
-            job["failed"] += 1
+            with lock:
+                job["failed"] += 1
 
-    job["current"] = None
+    with ThreadPoolExecutor(max_workers=CONCURRENCY) as pool:
+        list(pool.map(work, job["ids"]))
+
     if job["cancelled"]:
         job["status"] = "cancelled"
-        return
-
-    # build zip
-    if job["done"]:
-        job["status"] = "zipping"
-        zip_name = safe_filename(job["name"], "shorts") + ".zip"
-        zip_path = os.path.join(work_dir, zip_name)
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
-            for f in sorted(os.listdir(files_dir)):
-                zf.write(os.path.join(files_dir, f), arcname=f)
-        shutil.rmtree(files_dir, ignore_errors=True)
-        job["zip"] = zip_path
-        job["status"] = "finished"
     else:
-        job["status"] = "failed"
+        job["status"] = "finished" if job["done"] else "failed"
     job["finished_at"] = time.time()
 
 
+def build_zip(job):
+    """Pack the job's files into a ZIP (on demand; can be several GB)."""
+    with job["zip_lock"]:
+        if job.get("zip") and os.path.exists(job["zip"]):
+            return job["zip"]
+        files = [it["file"] for it in job["items"].values() if it.get("file")]
+        zip_path = os.path.join(job["dir"], safe_filename(job["name"], "shorts") + ".zip")
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
+            for f in files:
+                full = os.path.join(job["folder"], f)
+                if os.path.exists(full):
+                    zf.write(full, arcname=f)
+        job["zip"] = zip_path
+        return zip_path
+
+
 def cleanup_loop():
+    """Forget old jobs and delete their temporary ZIPs (saved videos are kept)."""
     while True:
         time.sleep(300)
         now = time.time()
         with jobs_lock:
-            stale = [j for j, v in jobs.items() if now - v["created_at"] > JOB_TTL_SECONDS]
+            stale = [j for j, v in jobs.items()
+                     if v["status"] != "running" and now - v["created_at"] > JOB_TTL_SECONDS]
             for j in stale:
                 shutil.rmtree(jobs[j]["dir"], ignore_errors=True)
                 jobs.pop(j, None)
@@ -329,6 +359,7 @@ def api_create_job():
 
     titles = data.get("titles") or {}
     job_id = uuid.uuid4().hex
+    channel_name = safe_filename(str(data.get("channel") or ""), "channel")
     job = {
         "id": job_id,
         "name": str(data.get("name") or "shorts")[:100],
@@ -339,9 +370,10 @@ def api_create_job():
         "status": "running",
         "done": 0,
         "failed": 0,
-        "current": None,
         "cancelled": False,
         "zip": None,
+        "zip_lock": threading.Lock(),
+        "folder": os.path.join(SAVE_DIR, channel_name),
         "dir": tempfile.mkdtemp(prefix=f"job-{job_id[:8]}-", dir=DOWNLOAD_ROOT),
         "created_at": time.time(),
     }
@@ -358,9 +390,9 @@ def public_job(job):
         "total": len(job["ids"]),
         "done": job["done"],
         "failed": job["failed"],
-        "current": job["current"],
-        "items": [job["items"][v] | {} for v in job["ids"]],
-        "zip_ready": bool(job["zip"]),
+        "skipped": sum(1 for it in job["items"].values() if it["status"] == "skipped"),
+        "folder": job["folder"],
+        "items": [job["items"][v] for v in job["ids"]],
     }
 
 
@@ -384,12 +416,32 @@ def api_job_cancel(job_id):
 @app.get("/api/jobs/<job_id>/zip")
 def api_job_zip(job_id):
     job = jobs.get(job_id)
-    if not job or not job.get("zip") or not os.path.exists(job["zip"]):
+    if not job or job["status"] != "finished":
         abort(404)
-    return send_file(job["zip"], as_attachment=True, download_name=os.path.basename(job["zip"]))
+    path = build_zip(job)
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
+
+
+@app.post("/api/jobs/<job_id>/open")
+def api_job_open_folder(job_id):
+    """Open the download folder in the file manager (works when running on your own PC)."""
+    job = jobs.get(job_id)
+    if not job or not os.path.isdir(job["folder"]):
+        abort(404)
+    try:
+        if sys.platform.startswith("win"):
+            os.startfile(job["folder"])  # noqa: S606 - local desktop use
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", job["folder"]])
+        else:
+            subprocess.Popen(["xdg-open", job["folder"]])
+    except Exception as exc:
+        return jsonify(error=str(exc)), 500
+    return jsonify(ok=True)
 
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", "5000"))
-    print(f"\n  ▶  Open http://localhost:{port} in your browser\n")
+    print(f"\n  ▶  Open http://localhost:{port} in your browser")
+    print(f"  ▶  Videos are saved to: {SAVE_DIR}\n")
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

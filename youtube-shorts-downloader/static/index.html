@@ -46,7 +46,7 @@
             <option value="480">480p (MP4)</option>
             <option value="audio">শুধু অডিও (M4A)</option>
           </select>
-          <button id="dlAll" class="primary">সিলেক্টেড ডাউনলোড (ZIP)</button>
+          <button id="dlAll" class="primary">সিলেক্টেড ডাউনলোড</button>
         </div>
       </div>
 
@@ -54,11 +54,13 @@
         <div class="job-head">
           <strong id="jobText">ডাউনলোড হচ্ছে…</strong>
           <div class="job-btns">
-            <a id="zipLink" class="primary btn" hidden>ZIP সেভ করুন</a>
+            <button id="openFolder" class="primary" hidden>📂 ফোল্ডার খুলুন</button>
+            <a id="zipLink" class="ghost btn" hidden>ZIP হিসেবে নিন</a>
             <button id="cancelJob" class="ghost">বাতিল</button>
           </div>
         </div>
         <div class="bar"><span id="jobBar"></span></div>
+        <p id="jobFolder" class="folder muted" hidden></p>
       </div>
 
       <div id="grid" class="grid"></div>
