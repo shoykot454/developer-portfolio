@@ -53,9 +53,12 @@
     grid.innerHTML = "";
     cards.clear();
     $("#chTitle").textContent = channel.title || "Shorts";
-    $("#chCount").textContent = `${shorts.length} টি Shorts`;
-    selectAll.checked = true;
+    const had = shorts.filter((s) => s.downloaded).length;
+    $("#chCount").textContent = had
+      ? `${shorts.length} টি Shorts · ${shorts.length - had} টি নতুন · ${had} টি আগে নামানো`
+      : `${shorts.length} টি Shorts`;
     jobBox.hidden = true;
+    if (had === shorts.length) showStatus("✓ এই চ্যানেলের সব Shorts আগেই নামানো আছে — নতুন কিছু নেই।");
 
     const frag = document.createDocumentFragment();
     for (const s of shorts) {
@@ -70,6 +73,7 @@
       node.querySelector(".title").title = s.title;
       node.querySelector(".views").textContent = fmtViews(s.views);
       const cb = node.querySelector(".pick input");
+      if (s.downloaded) markDownloaded(node, "✓ আগে নামানো");
       cb.addEventListener("change", () => { node.classList.toggle("off", !cb.checked); updateCount(); });
       node.querySelector(".dl").addEventListener("click", () => downloadSingle(s, node));
       cards.set(s.id, node);
@@ -80,6 +84,13 @@
     updateCount();
   }
 
+  // Already-downloaded shorts start unchecked, so only new ones get downloaded.
+  function markDownloaded(node, text) {
+    node.classList.add("had", "off");
+    node.querySelector(".pick input").checked = false;
+    setCardState(node, text, "ok");
+  }
+
   function selectedIds() {
     return shorts.filter((s) => cards.get(s.id).querySelector(".pick input").checked).map((s) => s.id);
   }
@@ -87,13 +98,18 @@
     const n = selectedIds().length;
     dlAll.textContent = `সিলেক্টেড ${n} টি ডাউনলোড`;
     dlAll.disabled = n === 0 || !!jobId;
-    selectAll.checked = n === shorts.length;
-    selectAll.indeterminate = n > 0 && n < shorts.length;
+    const fresh = shorts.filter((s) => !cards.get(s.id).classList.contains("had"));
+    const freshSel = fresh.filter((s) => cards.get(s.id).querySelector(".pick input").checked).length;
+    selectAll.checked = fresh.length > 0 && freshSel === fresh.length;
+    selectAll.indeterminate = freshSel > 0 && freshSel < fresh.length;
   }
+  // "সব সিলেক্ট" selects every NEW short; already-downloaded ones can still be ticked by hand.
   selectAll.addEventListener("change", () => {
     for (const node of cards.values()) {
-      node.querySelector(".pick input").checked = selectAll.checked;
-      node.classList.toggle("off", !selectAll.checked);
+      const cb = node.querySelector(".pick input");
+      if (node.classList.contains("had")) { if (!selectAll.checked) cb.checked = false; }
+      else cb.checked = selectAll.checked;
+      node.classList.toggle("off", !cb.checked);
     }
     updateCount();
   });
@@ -104,28 +120,27 @@
     el.className = "state" + (cls ? " " + cls : "");
   }
 
-  // Single download: the server downloads, then streams the file back.
+  // Single download: saved to the channel folder; skipped if it was downloaded before.
   async function downloadSingle(s, node) {
     const btn = node.querySelector(".dl");
     btn.disabled = true;
-    setCardState(node, "সার্ভারে প্রস্তুত হচ্ছে…", "run");
+    setCardState(node, "ডাউনলোড হচ্ছে…", "run");
     try {
-      const res = await fetch(`/api/download/${s.id}?quality=${quality.value}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || "Download failed");
-      }
-      const blob = await res.blob();
-      const cd = res.headers.get("Content-Disposition") || "";
-      const m = cd.match(/filename\*=UTF-8''([^;]+)/i) || cd.match(/filename="?([^";]+)"?/i);
-      const name = m ? decodeURIComponent(m[1]) : `${s.id}.mp4`;
-      const a = document.createElement("a");
-      a.href = URL.createObjectURL(blob);
-      a.download = name;
-      document.body.appendChild(a);
-      a.click();
-      setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 2000);
-      setCardState(node, "✓ ডাউনলোড হয়েছে", "ok");
+      const res = await fetch(`/api/download/${s.id}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ quality: quality.value, channel: channel.title || "channel", title: s.title }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "Download failed");
+      s.downloaded = true;
+      markDownloaded(node, data.status === "skipped" ? "✓ আগেই নামানো ছিল (আবার নামানো হয়নি)" : "✓ ফোল্ডারে সেভ হয়েছে");
+      const link = document.createElement("a");
+      link.href = `/api/file/${s.id}`;
+      link.textContent = " · ফাইল নিন";
+      link.className = "filelink";
+      node.querySelector(".state").appendChild(link);
+      updateCount();
     } catch (err) {
       setCardState(node, "✗ " + err.message, "err");
     } finally {
@@ -176,8 +191,11 @@
       for (const it of job.items) {
         const node = cards.get(it.id);
         if (!node) continue;
-        if (it.status === "done") setCardState(node, "✓ সম্পন্ন", "ok");
-        else if (it.status === "skipped") setCardState(node, "✓ আগেই নামানো ছিল", "ok");
+        if (it.status === "done" || it.status === "skipped") {
+          const s = shorts.find((x) => x.id === it.id);
+          if (s) s.downloaded = true;
+          markDownloaded(node, it.status === "done" ? "✓ সম্পন্ন" : "✓ আগেই নামানো ছিল (আবার নামানো হয়নি)");
+        }
         else if (it.status === "error") setCardState(node, "✗ " + (it.error || "ব্যর্থ"), "err");
         else if (it.status === "downloading") { setCardState(node, `ডাউনলোড হচ্ছে… ${Math.round(it.progress || 0)}%`, "run"); partial += (it.progress || 0) / 100; }
       }
@@ -193,8 +211,8 @@
         endJob();
         if (job.status === "finished") {
           jobBar.style.width = "100%";
-          const skipTxt = job.skipped ? ` (${job.skipped} টি আগেই ছিল)` : "";
-          jobText.textContent = `✓ ${job.done} টি Shorts ফোল্ডারে সেভ হয়েছে${skipTxt}${failTxt}`;
+          const skipTxt = job.skipped ? ` · ${job.skipped} টি আগেই ছিল, আবার নামানো হয়নি` : "";
+          jobText.textContent = `✓ ${job.new} টি নতুন Shorts সেভ হয়েছে${skipTxt}${failTxt}`;
           jobFolder.textContent = "ফোল্ডার: " + job.folder;
           openFolder.hidden = false;
           openFolder.onclick = () => fetch(`/api/jobs/${job.id}/open`, { method: "POST" });

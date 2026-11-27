@@ -9,6 +9,7 @@ Backend: Flask + yt-dlp. Run with:  python app.py   then open http://localhost:5
 
 import os
 import re
+import json
 import shutil
 import tempfile
 import threading
@@ -210,33 +211,94 @@ def download_one(video_id: str, out_dir: str, quality: str, progress_hook=None) 
     return path
 
 
-def find_existing(folder: str, video_id: str):
-    """Return an already-downloaded file for this video, so re-runs can resume."""
-    if not os.path.isdir(folder):
-        return None
-    for f in os.listdir(folder):
-        if (f"[{video_id}]" in f and not f.endswith((".part", ".ytdl", ".temp"))
-                and not re.search(r"\]\.f\d+\.", f)):  # skip unmerged partial streams
-            return os.path.join(folder, f)
+# --------------------------------------------------------------------------- #
+# Download history: every video is downloaded only once
+# --------------------------------------------------------------------------- #
+HISTORY_FILE = os.path.join(SAVE_DIR, ".downloaded.json")
+MEDIA_RE = re.compile(r"\[([A-Za-z0-9_-]{11})\]\.(mp4|m4a|webm|mkv|mp3|opus)$", re.I)
+history = {}                 # video_id -> {"path", "title", "channel", "at"}
+history_lock = threading.Lock()
+in_flight = {}               # video_id -> threading.Event (download running right now)
+
+
+def _save_history():
+    os.makedirs(SAVE_DIR, exist_ok=True)
+    tmp = HISTORY_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(history, fh, ensure_ascii=False, indent=1)
+    os.replace(tmp, HISTORY_FILE)
+
+
+def load_history():
+    """Load the history file and add any videos already sitting in SAVE_DIR."""
+    try:
+        with open(HISTORY_FILE, encoding="utf-8") as fh:
+            history.update(json.load(fh))
+    except (OSError, ValueError):
+        pass
+    changed = False
+    if os.path.isdir(SAVE_DIR):
+        for root, _dirs, files in os.walk(SAVE_DIR):
+            for f in files:
+                m = MEDIA_RE.search(f)
+                if not m:
+                    continue
+                vid, path = m.group(1), os.path.join(root, f)
+                entry = history.get(vid)
+                if not entry or not os.path.exists(entry.get("path", "")):
+                    history[vid] = {"path": path, "title": f[: m.start()].strip(),
+                                    "channel": os.path.basename(root), "at": time.time()}
+                    changed = True
+    if changed:
+        _save_history()
+
+
+def existing_file(video_id: str):
+    entry = history.get(video_id)
+    if entry and os.path.exists(entry.get("path", "")):
+        return entry["path"]
     return None
+
+
+def ensure_downloaded(video_id, folder, quality, title="", channel="", progress_hook=None):
+    """Download a video unless it was downloaded before. Returns (path, "done"|"skipped")."""
+    while True:
+        with history_lock:
+            path = existing_file(video_id)
+            if path:
+                return path, "skipped"
+            event = in_flight.get(video_id)
+            owner = event is None
+            if owner:
+                event = in_flight[video_id] = threading.Event()
+        if not owner:            # same video is downloading in another job: wait, then re-check
+            event.wait()
+            continue
+        try:
+            os.makedirs(folder, exist_ok=True)
+            path = download_one(video_id, folder, quality, progress_hook)
+            with history_lock:
+                history[video_id] = {"path": path, "title": title, "channel": channel, "at": time.time()}
+                _save_history()
+            return path, "done"
+        finally:
+            with history_lock:
+                in_flight.pop(video_id, None)
+            event.set()
+
+
+load_history()
 
 
 def run_job(job_id: str):
     job = jobs[job_id]
     folder = job["folder"]
-    os.makedirs(folder, exist_ok=True)
     lock = threading.Lock()
 
     def work(vid):
         if job["cancelled"]:
             return
         item = job["items"][vid]
-        existing = find_existing(folder, vid)
-        if existing:
-            item.update(status="skipped", progress=100, file=os.path.basename(existing))
-            with lock:
-                job["done"] += 1
-            return
         item["status"] = "downloading"
 
         def hook(d):
@@ -249,8 +311,8 @@ def run_job(job_id: str):
                 item["progress"] = 100
 
         try:
-            path = download_one(vid, folder, job["quality"], hook)
-            item.update(status="done", progress=100, file=os.path.basename(path))
+            path, how = ensure_downloaded(vid, folder, job["quality"], item["title"], job["channel"], hook)
+            item.update(status=how, progress=100, path=path, file=os.path.basename(path))
             with lock:
                 job["done"] += 1
         except Exception as exc:  # keep going with the rest
@@ -274,13 +336,12 @@ def build_zip(job):
     with job["zip_lock"]:
         if job.get("zip") and os.path.exists(job["zip"]):
             return job["zip"]
-        files = [it["file"] for it in job["items"].values() if it.get("file")]
+        files = [it["path"] for it in job["items"].values() if it.get("path")]
         zip_path = os.path.join(job["dir"], safe_filename(job["name"], "shorts") + ".zip")
         with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
-            for f in files:
-                full = os.path.join(job["folder"], f)
+            for full in files:
                 if os.path.exists(full):
-                    zf.write(full, arcname=f)
+                    zf.write(full, arcname=os.path.basename(full))
         job["zip"] = zip_path
         return zip_path
 
@@ -327,24 +388,35 @@ def api_shorts():
         if "does not have a shorts tab" in msg.lower() or "This channel does not have" in msg:
             return jsonify(error="This channel has no Shorts."), 404
         return jsonify(error=f"Couldn't read that channel: {msg[:300]}"), 502
-    return jsonify(channel=channel, shorts=shorts, count=len(shorts))
+    for sh in shorts:
+        sh["downloaded"] = sh["id"] in history
+    return jsonify(channel=channel, shorts=shorts, count=len(shorts),
+                   downloaded=sum(sh["downloaded"] for sh in shorts))
 
 
-@app.get("/api/download/<video_id>")
+@app.post("/api/download/<video_id>")
 def api_download_single(video_id):
+    """Save one short to the channel folder (skipped if it was downloaded before)."""
     if not VIDEO_ID_RE.match(video_id):
         abort(400)
-    quality = request.args.get("quality", "best")
-    tmp = tempfile.mkdtemp(dir=DOWNLOAD_ROOT)
+    data = request.get_json(silent=True) or {}
+    quality = data.get("quality") if data.get("quality") in QUALITY_FORMATS else "best"
+    channel = safe_filename(str(data.get("channel") or ""), "channel")
     try:
-        path = download_one(video_id, tmp, quality)
+        path, how = ensure_downloaded(video_id, os.path.join(SAVE_DIR, channel), quality,
+                                      str(data.get("title") or "")[:200], channel)
     except Exception as exc:
-        shutil.rmtree(tmp, ignore_errors=True)
         return jsonify(error=str(exc).replace("ERROR: ", "")[:300]), 502
+    return jsonify(status=how, file=os.path.basename(path), folder=os.path.dirname(path))
 
-    response = send_file(path, as_attachment=True, download_name=os.path.basename(path))
-    response.call_on_close(lambda: shutil.rmtree(tmp, ignore_errors=True))
-    return response
+
+@app.get("/api/file/<video_id>")
+def api_get_file(video_id):
+    """Send an already-downloaded file to the browser (e.g. when using the site from a phone)."""
+    path = existing_file(video_id) if VIDEO_ID_RE.match(video_id) else None
+    if not path:
+        abort(404)
+    return send_file(path, as_attachment=True, download_name=os.path.basename(path))
 
 
 @app.post("/api/jobs")
@@ -373,6 +445,7 @@ def api_create_job():
         "cancelled": False,
         "zip": None,
         "zip_lock": threading.Lock(),
+        "channel": channel_name,
         "folder": os.path.join(SAVE_DIR, channel_name),
         "dir": tempfile.mkdtemp(prefix=f"job-{job_id[:8]}-", dir=DOWNLOAD_ROOT),
         "created_at": time.time(),
@@ -391,8 +464,9 @@ def public_job(job):
         "done": job["done"],
         "failed": job["failed"],
         "skipped": sum(1 for it in job["items"].values() if it["status"] == "skipped"),
+        "new": sum(1 for it in job["items"].values() if it["status"] == "done"),
         "folder": job["folder"],
-        "items": [job["items"][v] for v in job["ids"]],
+        "items": [{k: v for k, v in job["items"][i].items() if k != "path"} for i in job["ids"]],
     }
 
 
@@ -426,7 +500,10 @@ def api_job_zip(job_id):
 def api_job_open_folder(job_id):
     """Open the download folder in the file manager (works when running on your own PC)."""
     job = jobs.get(job_id)
-    if not job or not os.path.isdir(job["folder"]):
+    if not job:
+        abort(404)
+    os.makedirs(job["folder"], exist_ok=True)
+    if not os.path.isdir(job["folder"]):
         abort(404)
     try:
         if sys.platform.startswith("win"):
